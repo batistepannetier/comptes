@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mes comptes</title>
+  <style>
+    :root {
+      --fond: #f6f7f9; --carte: #ffffff; --texte: #1f2328; --discret: #656d76;
+      --bordure: #d0d7de; --accent: #0969da; --succes: #1a7f37; --erreur: #cf222e;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fond: #0d1117; --carte: #161b22; --texte: #e6edf3; --discret: #8d96a0;
+        --bordure: #30363d; --accent: #4493f8; --succes: #3fb950; --erreur: #f85149;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--fond); color: var(--texte); }
+    main { max-width: 900px; margin: 0 auto; padding: 24px 16px; }
+    h1 { margin-top: 0; }
+    section { background: var(--carte); border: 1px solid var(--bordure); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .message { margin: 12px 0 0; min-height: 1.4em; color: var(--discret); }
+    .message.succes { color: var(--succes); }
+    .message.erreur { color: var(--erreur); }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bordure); }
+    th { color: var(--discret); font-weight: 600; }
+    form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }
+    label { display: flex; flex-direction: column; gap: 4px; font-size: .9em; color: var(--discret); }
+    input, select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--bordure); background: var(--fond); color: var(--texte); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>💶 Mes comptes</h1>
+
+    <section>
+      <div class="actions">
+        <button type="button" id="btn-nouveau" disabled>Créer un nouveau fichier</button>
+        <button type="button" id="btn-ouvrir" disabled>Ouvrir mon fichier</button>
+      </div>
+      <p id="message" class="message" aria-live="polite">Chargement de SQLite…</p>
+    </section>
+
+    <div id="zone-base" hidden>
+      <section>
+        <h2>Fichier : <span id="nom-fichier"></span></h2>
+        <table>
+          <thead><tr><th>Table</th><th>Nombre de lignes</th></tr></thead>
+          <tbody id="liste-tables"></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Comptes</h2>
+        <p id="aucun-compte" class="message">Aucun compte pour l'instant.</p>
+        <table>
+          <thead><tr><th>Nom</th><th>Type</th><th>Solde initial</th><th>Date du solde</th></tr></thead>
+          <tbody id="liste-comptes"></tbody>
+        </table>
+
+        <h3>Ajouter un compte</h3>
+        <form id="form-compte">
+          <label>Nom
+            <input id="compte-nom" type="text" required maxlength="60" placeholder="Compte Chèque">
+          </label>
+          <label>Type
+            <select id="compte-type">
+              <option value="courant">Courant</option>
+              <option value="epargne">Épargne</option>
+              <option value="externe">Externe</option>
+            </select>
+          </label>
+          <label>Solde initial (€)
+            <input id="compte-solde" type="text" inputmode="decimal" placeholder="1250,50">
+          </label>
+          <label>Date du solde
+            <input id="compte-date" type="date">
+          </label>
+          <button type="submit">Ajouter</button>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <script src="lib/sql-wasm.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
