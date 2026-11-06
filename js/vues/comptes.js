@@ -64,6 +64,15 @@ export function afficherComptes(conteneur) {
     ORDER BY actif DESC, ordre_affichage, nom`);
   $('vide').hidden = comptes.length > 0;
 
+  function bouton(texte, classes, action) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = classes;
+    b.textContent = texte;
+    b.addEventListener('click', action);
+    return b;
+  }
+
   for (const c of comptes) {
     const tr = document.createElement('tr');
     if (!c.actif) tr.className = 'inactif';
@@ -78,20 +87,11 @@ export function afficherComptes(conteneur) {
     const tdActions = document.createElement('td');
     const actions = document.createElement('div');
     actions.className = 'actions-ligne';
-
-    const btnModifier = document.createElement('button');
-    btnModifier.type = 'button';
-    btnModifier.className = 'petit secondaire';
-    btnModifier.textContent = 'Modifier';
-    btnModifier.addEventListener('click', () => modeModification(c));
-
-    const btnActif = document.createElement('button');
-    btnActif.type = 'button';
-    btnActif.className = 'petit secondaire';
-    btnActif.textContent = c.actif ? 'Désactiver' : 'Réactiver';
-    btnActif.addEventListener('click', () => basculerActif(c));
-
-    actions.append(btnModifier, btnActif);
+    actions.append(
+      bouton('Modifier', 'petit secondaire', () => modeModification(c)),
+      bouton(c.actif ? 'Désactiver' : 'Réactiver', 'petit secondaire', () => basculerActif(c)),
+      bouton('Supprimer', 'petit danger', () => supprimer(c))
+    );
     tdActions.append(actions);
     tr.append(tdActions);
     $('liste').append(tr);
@@ -132,6 +132,40 @@ export function afficherComptes(conteneur) {
   async function basculerActif(c) {
     db.executer('UPDATE comptes SET actif = 1 - actif WHERE id = ?', [c.id]);
     await sauvegarder(`Compte « ${c.nom} » ${c.actif ? 'désactivé' : 'réactivé'}.`);
+  }
+
+  // ---------- Suppression ----------
+  async function supprimer(c) {
+    // 1. Refus si des opérations sont rattachées au compte
+    const [{ nb_operations }] = db.lire(
+      'SELECT COUNT(*) AS nb_operations FROM operations WHERE compte_id = ?', [c.id]);
+    if (nb_operations > 0) {
+      return message(
+        `Impossible de supprimer « ${c.nom} » : ${nb_operations} opération(s) y sont rattachées. ` +
+        'Tu peux le désactiver à la place.', 'erreur');
+    }
+
+    // 2. Confirmation (en signalant les règles d'import qui seront supprimées)
+    const [{ nb_regles }] = db.lire(
+      'SELECT COUNT(*) AS nb_regles FROM mapping_import WHERE compte_id = ?', [c.id]);
+    let question = `Supprimer définitivement le compte « ${c.nom} » ?`;
+    if (nb_regles > 0) {
+      question += `\n\n${nb_regles} règle(s) d'import liée(s) à ce compte seront aussi supprimées.`;
+    }
+    question += '\n\nCette action est irréversible.';
+    if (!confirm(question)) return;
+
+    // 3. Suppression dans une transaction : tout ou rien
+    try {
+      db.executer('BEGIN');
+      db.executer('DELETE FROM mapping_import WHERE compte_id = ?', [c.id]); // leurs lignes suivent (ON DELETE CASCADE)
+      db.executer('DELETE FROM comptes WHERE id = ?', [c.id]);
+      db.executer('COMMIT');
+    } catch (e) {
+      try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }
+      return message(`Suppression impossible : ${e.message}`, 'erreur');
+    }
+    await sauvegarder(`Compte « ${c.nom} » supprimé.`);
   }
 
   $('annuler').addEventListener('click', modeAjout);
