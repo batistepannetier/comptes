@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { message, euros, lireMontant, montantPourSaisie, dateFr } from '../outils.js';
+import { message, lireMontant, montantPourSaisie } from '../outils.js';
 
 // ⚠️ Les valeurs doivent être identiques à celles du CHECK de schema.sql
 const TYPES = [
@@ -14,19 +14,6 @@ export function afficherComptes(conteneur) {
 
   conteneur.innerHTML = `
     <p><a href="#/" class="retour">← Retour à l'accueil</a></p>
-    <section>
-      <h2>Comptes</h2>
-      <p class="message" data-ref="vide" hidden>Aucun compte pour l'instant.</p>
-      <div class="defilement">
-        <table>
-          <thead><tr>
-            <th>Nom</th><th>Type</th><th>Rattaché à</th><th>Solde initial</th>
-            <th>Date du solde</th><th>Statut</th><th>Actions</th>
-          </tr></thead>
-          <tbody data-ref="liste"></tbody>
-        </table>
-      </div>
-    </section>
     <section>
       <h2 data-ref="titre-form">Ajouter un compte</h2>
       <form data-ref="form" novalidate>
@@ -50,6 +37,19 @@ export function afficherComptes(conteneur) {
           <button type="button" class="secondaire" data-ref="annuler" hidden>Annuler</button>
         </div>
       </form>
+    </section>
+    <section>
+      <h2>Comptes</h2>
+      <p class="message" data-ref="vide" hidden>Aucun compte pour l'instant.</p>
+      <div class="defilement">
+        <table>
+          <thead><tr>
+            <th>Nom</th><th>Type</th><th>Rattaché à</th><th>Statut</th>
+            <th class="col-actions">Actions</th>
+          </tr></thead>
+          <tbody data-ref="liste"></tbody>
+        </table>
+      </div>
     </section>`;
   const $ = ref => conteneur.querySelector(`[data-ref="${ref}"]`);
 
@@ -91,14 +91,14 @@ export function afficherComptes(conteneur) {
     const tr = document.createElement('tr');
     if (!c.actif) tr.className = 'inactif';
 
-    for (const valeur of [c.nom, libelleType(c.type), c.rattachement_nom ?? '—', euros(c.solde_initial),
-                          dateFr(c.date_solde_initial), c.actif ? 'Actif' : 'Inactif']) {
+    for (const valeur of [c.nom, libelleType(c.type), c.rattachement_nom ?? '—', c.actif ? 'Actif' : 'Inactif']) {
       const td = document.createElement('td');
       td.textContent = valeur;
       tr.append(td);
     }
 
     const tdActions = document.createElement('td');
+    tdActions.className = 'col-actions';
     const actions = document.createElement('div');
     actions.className = 'actions-ligne';
     actions.append(
@@ -156,8 +156,8 @@ export function afficherComptes(conteneur) {
     $('titre-form').textContent = `Modifier « ${c.nom} »`;
     $('valider').textContent = 'Enregistrer';
     $('annuler').hidden = false;
-    $('form').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    $('nom').focus();
+    $('titre-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('nom').focus({ preventScroll: true });
   }
 
   async function sauvegarder(texteSucces) {

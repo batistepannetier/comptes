@@ -43,7 +43,8 @@ table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bordure); }
 th { color: var(--discret); font-weight: 600; }
 tr.inactif td { color: var(--discret); font-style: italic; }
-.actions-ligne { display: flex; flex-wrap: wrap; gap: 6px; }
+.actions-ligne { display: flex; flex-wrap: nowrap; gap: 6px; }
+td.col-actions, th.col-actions { width: 1%; white-space: nowrap; }
 
 /* Formulaires */
 form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }
