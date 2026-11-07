@@ -7,6 +7,29 @@ let SQL = null;     // moteur sql.js
 let db = null;      // base ouverte
 let handle = null;  // fichier sur le disque
 
+// ---------- Migrations ----------
+// MIGRATIONS[n] fait passer la base de la version n à la version n+1.
+// Chaque migration doit pouvoir être rejouée sans erreur.
+const MIGRATIONS = [
+  // v0 → v1 : rattachement des comptes épargne à un compte courant
+  base => {
+    const colonnes = base.exec('PRAGMA table_info(comptes)')[0].values.map(v => v[1]);
+    if (!colonnes.includes('compte_rattachement_id')) {
+      base.run('ALTER TABLE comptes ADD COLUMN compte_rattachement_id INTEGER REFERENCES comptes(id)');
+    }
+    base.run('CREATE INDEX IF NOT EXISTS idx_comptes_rattachement ON comptes(compte_rattachement_id)');
+  },
+];
+
+function migrer(base) {
+  let version = base.exec('PRAGMA user_version')[0].values[0][0];
+  while (version < MIGRATIONS.length) {
+    MIGRATIONS[version](base);
+    version++;
+    base.run(`PRAGMA user_version = ${version}`);
+  }
+}
+
 export async function initialiserSQLite() {
   SQL = await initSqlJs({ locateFile: nom => `lib/${nom}` });
 }
@@ -35,6 +58,7 @@ export async function creerFichier() {
   const nouvelle = new SQL.Database();
   try {
     nouvelle.exec(schema);
+    migrer(nouvelle); // sécurité si schema.sql n'est pas à jour
   } catch (e) {
     nouvelle.close();
     throw e;
@@ -51,6 +75,7 @@ export async function ouvrirFichier() {
   try {
     const verif = nouvelle.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'comptes'");
     if (verif.length === 0) throw new Error('ce fichier ne contient pas la table « comptes »');
+    migrer(nouvelle); // enregistrée dans le fichier à la prochaine modification
   } catch (e) {
     nouvelle.close();
     throw e;

@@ -9,6 +9,7 @@ CREATE TABLE comptes (
     date_solde_initial  TEXT,                                -- 'AAAA-MM-JJ'
     actif               INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0, 1)),
     ordre_affichage     INTEGER NOT NULL DEFAULT 0
+    compte_rattachement_id  INTEGER REFERENCES comptes(id)   -- compte courant de rattachement (épargne)
 );
 
 -- 2. RUBRIQUES (hiérarchie N1 → N4)
@@ -85,3 +86,6 @@ AFTER UPDATE ON operations
 BEGIN
     UPDATE operations SET date_modif = datetime('now', 'localtime') WHERE id = NEW.id;
 END;
+
+CREATE INDEX idx_comptes_rattachement ON comptes(compte_rattachement_id);
+PRAGMA user_version = 1;

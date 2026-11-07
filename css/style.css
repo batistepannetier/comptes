@@ -66,3 +66,14 @@ a.tuile:hover { border-color: var(--accent); }
 .tuile .icone { font-size: 1.6em; }
 .tuile.bientot { opacity: .55; }
 .badge { font-size: .75em; color: var(--discret); border: 1px solid var(--bordure); border-radius: 999px; padding: 1px 8px; }
+
+/* Groupes de comptes sur l'accueil */
+.groupes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.groupe { border: 1px solid var(--bordure); border-radius: 8px; padding: 12px; }
+.groupe.orphelin { border-style: dashed; }
+.groupe .cartes { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+.groupe p { margin: 0 0 10px; font-size: .9em; }
+.entete-groupe { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.entete-groupe h3 { margin: 0; font-size: 1.05em; }
+.total-groupe { font-size: 1.2em; font-weight: 700; }
+.carte.principale { border-color: var(--accent); }
