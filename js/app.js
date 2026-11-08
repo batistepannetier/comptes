@@ -3,11 +3,13 @@ import { message } from './outils.js';
 import { afficherAccueil } from './vues/accueil.js';
 import { afficherComptes } from './vues/comptes.js';
 import { afficherRubriques } from './vues/rubriques.js';
+import { afficherImportRubriques } from './vues/import-rubriques.js';
 
 const ROUTES = {
   '': afficherAccueil,
   'comptes': afficherComptes,
   'rubriques': afficherRubriques,
+  'rubriques/import': afficherImportRubriques,
 };
 
 const routeCourante = () => location.hash.replace(/^#\/?/, '');

@@ -90,3 +90,19 @@ button.deplier { width: 1.6em; height: 1.6em; padding: 0; border: none; backgrou
 .puce { display: inline-block; width: 1.6em; }
 tr.niveau-1 td { font-weight: 600; }
 .nb { color: var(--discret); font-size: .85em; font-weight: 400; }
+
+/* En-tête de section avec lien d'action */
+.entete-section { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
+.entete-section h2 { margin: 0; }
+.bouton-lien { padding: 4px 10px; font-size: .85em; border: 1px solid var(--accent); border-radius: 6px; color: var(--accent); text-decoration: none; }
+
+/* Import de rubriques */
+textarea { font: inherit; font-family: Consolas, "Courier New", monospace; width: 100%; padding: 8px; resize: vertical;
+           border-radius: 6px; border: 1px solid var(--bordure); background: var(--fond); color: var(--texte); tab-size: 20; }
+textarea:focus-visible, a.bouton-lien:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.options { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+label.case { flex-direction: row; align-items: center; gap: 8px; color: var(--texte); }
+.natures { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.erreurs { color: var(--erreur); margin-top: 0; }
+.apercu-liste { max-height: 400px; overflow-y: auto; margin-bottom: 12px; }
+.statut-nouvelle { color: var(--succes); font-weight: 600; }

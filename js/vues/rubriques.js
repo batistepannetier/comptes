@@ -1,5 +1,5 @@
 import * as db from '../db.js';
-import { message } from '../outils.js';
+import { message, normaliser } from '../outils.js';
 
 // ⚠️ Les valeurs doivent être identiques à celles du CHECK de schema.sql (colonne nature)
 const NATURES = [
@@ -13,9 +13,6 @@ const NIVEAU_MAX = 3;
 // Conservés entre deux affichages (après chaque enregistrement)
 const ouverts = new Set();
 let recherche = '';
-
-// "Santé " → "sante" : comparaison sans accents ni majuscules
-const normaliser = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
 // Construit l'arbre N1 › N2 › N3 à partir de la table
 function chargerArbre() {
@@ -69,8 +66,10 @@ export function afficherRubriques(conteneur) {
       </form>
     </section>
     <section>
-      <h2>Rubriques</h2>
-      <div class="barre-outils">
+      <div class="entete-section">
+        <h2>Rubriques</h2>
+        <a href="#/rubriques/import" class="bouton-lien">📥 Importer depuis Excel</a>
+      </div>      <div class="barre-outils">
         <input data-ref="recherche" type="search" placeholder="Rechercher une rubrique…" aria-label="Rechercher une rubrique">
         <button type="button" class="petit secondaire" data-ref="tout-ouvrir">Tout déplier</button>
         <button type="button" class="petit secondaire" data-ref="tout-fermer">Tout replier</button>

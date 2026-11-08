@@ -28,3 +28,6 @@ export function dateFr(iso) {
   const [a, m, j] = iso.split('-');
   return `${j}/${m}/${a}`;
 }
+
+// "Santé " → "sante" : comparaison sans accents ni majuscules
+export const normaliser = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
