@@ -78,3 +78,15 @@ a.tuile:hover { border-color: var(--accent); }
 .entete-groupe h3 { margin: 0; font-size: 1.05em; }
 .total-groupe { font-size: 1.2em; font-weight: 700; }
 .carte.principale { border-color: var(--accent); }
+
+/* Corrige l'attribut hidden sur les éléments qui ont un display (label, div…) */
+[hidden] { display: none !important; }
+
+/* Arbre des rubriques */
+.barre-outils { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.barre-outils input { flex: 1 1 200px; }
+.arbre { display: flex; align-items: center; gap: 6px; }
+button.deplier { width: 1.6em; height: 1.6em; padding: 0; border: none; background: transparent; color: var(--texte); line-height: 1; }
+.puce { display: inline-block; width: 1.6em; }
+tr.niveau-1 td { font-weight: 600; }
+.nb { color: var(--discret); font-size: .85em; font-weight: 400; }
