@@ -5,7 +5,7 @@ import { euros } from '../outils.js';
 const FONCTIONS = [
   { icone: '🏦', titre: 'Gérer les comptes',           lien: '#/comptes' },
   { icone: '🗂️', titre: 'Gérer les rubriques',         lien: '#/rubriques' },
-  { icone: '✍️', titre: 'Nouvelle dépense',            lien: null },
+  { icone: '✍️', titre: 'Nouvelle dépense',            lien: '#/operation' },
   { icone: '⚡', titre: 'Dépense rapide',              lien: null },
   { icone: '📥', titre: 'Importer un relevé bancaire', lien: null },
   { icone: '📅', titre: 'Préparer une nouvelle année', lien: null },

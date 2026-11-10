@@ -4,12 +4,14 @@ import { afficherAccueil } from './vues/accueil.js';
 import { afficherComptes } from './vues/comptes.js';
 import { afficherRubriques } from './vues/rubriques.js';
 import { afficherImportRubriques } from './vues/import-rubriques.js';
+import { afficherOperation } from './vues/operation.js';
 
 const ROUTES = {
   '': afficherAccueil,
   'comptes': afficherComptes,
   'rubriques': afficherRubriques,
   'rubriques/import': afficherImportRubriques,
+  'operation': afficherOperation,
 };
 
 const routeCourante = () => location.hash.replace(/^#\/?/, '');

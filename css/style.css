@@ -106,3 +106,18 @@ label.case { flex-direction: row; align-items: center; gap: 8px; color: var(--te
 .erreurs { color: var(--erreur); margin-top: 0; }
 .apercu-liste { max-height: 400px; overflow-y: auto; margin-bottom: 12px; }
 .statut-nouvelle { color: var(--succes); font-weight: 600; }
+
+/* Saisie d'une opération */
+form.form-operation { display: block; } /* annule la grille générale des formulaires */
+.grille { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; align-items: end; }
+.grille .pleine { grid-column: 1 / -1; }
+.grille input, .grille select, .ligne input, .ligne select { width: 100%; min-width: 0; }
+.ligne { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; align-items: end;
+         padding: 10px; margin-bottom: 8px; border: 1px solid var(--bordure); border-radius: 8px; background: var(--fond); }
+.ligne input, .ligne select { background: var(--carte); }
+select:disabled { opacity: .5; }
+.pied-lignes { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 16px; }
+.reste { font-weight: 600; }
+.reste.succes { color: var(--succes); }
+.reste.erreur { color: var(--erreur); }
+td.num, th.num { text-align: right; white-space: nowrap; }
