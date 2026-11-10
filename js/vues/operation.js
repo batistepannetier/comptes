@@ -8,7 +8,6 @@ const STATUTS = [
 ];
 const MODE_SAISIE = 'formulaire';
 const TYPE_EXTERNE = 'Externe';
-const NIVEAUX = 3;
 
 // Conservés d'une saisie à l'autre
 const memo = { compte: '', sens: '-1', statut: 'realisee', date: '' };
@@ -73,7 +72,8 @@ export function afficherOperation(conteneur) {
   const { racines, parId, chemin } = chargerRubriques();
   const comptes = db.lire(
     'SELECT id, nom FROM comptes WHERE actif = 1 AND type <> ? ORDER BY ordre_affichage, nom', [TYPE_EXTERNE]);
-  let lignes = [];
+  let rubriqueIds = []; // rubriques choisies : [N1, N2, N3]
+  let lignes = [];      // répartition : { mois, texte }
   let compteur = 0;
 
   conteneur.innerHTML = `
@@ -91,17 +91,23 @@ export function afficherOperation(conteneur) {
           </label>
           <label>Montant (€) <input data-ref="montant" type="text" inputmode="decimal" placeholder="45,90"></label>
           <label>Statut <select data-ref="statut"></select></label>
-          <label><span data-ref="libelle-date">Date banque</span> <input data-ref="date" type="date"></label>
-          <label class="pleine">Libellé bancaire
-            <input data-ref="libelle" type="text" maxlength="120" placeholder="CB BIOCOOP PARIS 11">
-          </label>
-          <label class="pleine">Note <input data-ref="note" type="text" maxlength="250"></label>
+          <label>Date banque <input data-ref="date" type="date"></label>
         </div>
 
-        <h3>Répartition</h3>
+        <h3>Rubrique</h3>
+        <div class="grille">
+          <label>Niveau 1 <select data-ref="n1"></select></label>
+          <label>Niveau 2 <select data-ref="n2"></select></label>
+          <label>Niveau 3 <select data-ref="n3"></select></label>
+          <label class="pleine">Détail
+            <input data-ref="detail" type="text" maxlength="200" placeholder="Glace canal Saint-Martin">
+          </label>
+        </div>
+
+        <h3>Répartition par mois</h3>
         <div data-ref="lignes"></div>
         <div class="pied-lignes">
-          <button type="button" class="petit secondaire" data-ref="ajout-ligne">+ Ajouter une ligne</button>
+          <button type="button" class="petit secondaire" data-ref="ajout-ligne">+ Ajouter un mois</button>
           <span data-ref="reste" class="reste" aria-live="polite"></span>
         </div>
 
@@ -117,7 +123,7 @@ export function afficherOperation(conteneur) {
       <div class="defilement">
         <table>
           <thead><tr>
-            <th>Date</th><th>Compte</th><th>Libellé</th><th>Rubrique</th>
+            <th>Date banque</th><th>Compte</th><th>Rubrique</th><th>Détail</th>
             <th class="num">Montant</th><th>Statut</th><th class="col-actions">Actions</th>
           </tr></thead>
           <tbody data-ref="recentes"></tbody>
@@ -136,11 +142,7 @@ export function afficherOperation(conteneur) {
   $('date').value = memo.date || aujourdhui();
   if (comptes.length === 0) message("Aucun compte actif : crée d'abord un compte dans « Gérer les comptes ».", 'erreur');
 
-  function majStatut() {
-    $('libelle-date').textContent = $('statut').value === 'prevue' ? 'Date prévue (facultatif)' : 'Date banque';
-  }
-  $('statut').addEventListener('change', majStatut);
-
+  // Le mois d'imputation suit la date banque tant qu'on ne l'a pas modifié
   $('date').addEventListener('change', () => {
     for (const l of lignes) {
       if (!l.moisAuto) continue;
@@ -149,6 +151,7 @@ export function afficherOperation(conteneur) {
     }
   });
 
+  // Avec un seul mois, la ligne reprend automatiquement le montant total
   $('montant').addEventListener('input', () => {
     if (lignes.length === 1 && lignes[0].auto) {
       lignes[0].texte = $('montant').value;
@@ -157,58 +160,51 @@ export function afficherOperation(conteneur) {
     majReste();
   });
 
-  // ---------- Lignes de répartition ----------
-  const nouvelleLigne = () => ({
-    cle: ++compteur, ids: [], detail: '', texte: '',
-    mois: moisDe($('date').value), auto: true, moisAuto: true,
-  });
+  // ---------- Rubriques en cascade ----------
+  const selectsRubrique = [$('n1'), $('n2'), $('n3')];
+
+  function majCascade() {
+    let liste = racines;
+    selectsRubrique.forEach((s, k) => {
+      s.replaceChildren();
+      if (!liste || liste.length === 0) {
+        s.append(option('', '—'));
+        s.disabled = true;
+        liste = null;
+        return;
+      }
+      s.disabled = false;
+      s.append(option('', 'Choisir…'), ...liste.map(r => option(String(r.id), r.nom)));
+      const choisi = liste.find(r => r.id === rubriqueIds[k]);
+      s.value = choisi ? String(choisi.id) : '';
+      liste = choisi ? choisi.enfants : null;
+    });
+  }
+  selectsRubrique.forEach((s, k) => s.addEventListener('change', () => {
+    rubriqueIds = rubriqueIds.slice(0, k);
+    if (s.value) rubriqueIds.push(Number(s.value));
+    majCascade();
+  }));
 
   // Rubrique utilisable = la dernière choisie, si elle n'a pas de sous-rubrique
-  const feuille = l => {
-    const r = parId.get(l.ids[l.ids.length - 1]);
+  function rubriqueFeuille() {
+    const r = parId.get(rubriqueIds[rubriqueIds.length - 1]);
     return r && r.enfants.length === 0 ? r.id : null;
-  };
+  }
+
+  // ---------- Répartition par mois ----------
+  const nouvelleLigne = () => ({
+    cle: ++compteur, texte: '', mois: moisDe($('date').value), auto: true, moisAuto: true,
+  });
 
   function blocLigne(l, i) {
     const bloc = creer('div', 'ligne');
 
-    // Rubriques en cascade
-    const selects = [];
-    function majCascade() {
-      let liste = racines;
-      selects.forEach((s, k) => {
-        s.replaceChildren();
-        if (!liste || liste.length === 0) {
-          s.append(option('', '—'));
-          s.disabled = true;
-          liste = null;
-          return;
-        }
-        s.disabled = false;
-        s.append(option('', 'Choisir…'), ...liste.map(r => option(String(r.id), r.nom)));
-        const choisi = liste.find(r => r.id === l.ids[k]);
-        s.value = choisi ? String(choisi.id) : '';
-        liste = choisi ? choisi.enfants : null;
-      });
-    }
-    for (let k = 0; k < NIVEAUX; k++) {
-      const s = document.createElement('select');
-      s.addEventListener('change', () => {
-        l.ids = l.ids.slice(0, k);
-        if (s.value) l.ids.push(Number(s.value));
-        majCascade();
-      });
-      selects.push(s);
-      bloc.append(champ(`Niveau ${k + 1}`, s));
-    }
-    majCascade();
-
-    const detail = document.createElement('input');
-    detail.type = 'text';
-    detail.maxLength = 200;
-    detail.placeholder = 'Glace canal Saint-Martin';
-    detail.value = l.detail;
-    detail.addEventListener('input', () => { l.detail = detail.value; });
+    const mois = document.createElement('input');
+    mois.type = 'month';
+    mois.value = l.mois;
+    mois.addEventListener('change', () => { l.mois = mois.value; l.moisAuto = false; });
+    l.champMois = mois;
 
     const montant = document.createElement('input');
     montant.type = 'text';
@@ -218,18 +214,12 @@ export function afficherOperation(conteneur) {
     montant.addEventListener('input', () => { l.texte = montant.value; l.auto = false; majReste(); });
     l.champMontant = montant;
 
-    const mois = document.createElement('input');
-    mois.type = 'month';
-    mois.value = l.mois;
-    mois.addEventListener('change', () => { l.mois = mois.value; l.moisAuto = false; });
-    l.champMois = mois;
-
     const actions = creer('div', 'actions-ligne');
     actions.append(
       bouton('Échelonner…', 'petit secondaire', () => echelonner(i)),
       bouton('Retirer', 'petit danger', () => retirer(i)));
 
-    bloc.append(champ('Détail', detail), champ('Montant (€)', montant), champ("Mois d'imputation", mois), actions);
+    bloc.append(champ("Mois d'imputation", mois), champ('Montant (€)', montant), actions);
     return bloc;
   }
 
@@ -247,7 +237,7 @@ export function afficherOperation(conteneur) {
     let somme = 0;
     for (const l of lignes) {
       const m = lireMontant(l.texte);
-      if (m === null) return afficher('Un montant de ligne est invalide.', 'erreur');
+      if (m === null) return afficher('Un montant mensuel est invalide.', 'erreur');
       somme += m;
     }
     const ecart = total - somme;
@@ -259,8 +249,8 @@ export function afficherOperation(conteneur) {
   function echelonner(i) {
     const l = lignes[i];
     const total = lireMontant(l.texte);
-    if (!total) return message(`Ligne ${i + 1} : saisis d'abord le montant à échelonner.`, 'erreur');
-    if (!/^\d{4}-\d{2}$/.test(l.mois)) return message(`Ligne ${i + 1} : choisis le premier mois.`, 'erreur');
+    if (!total) return message(`Mois ${i + 1} : saisis d'abord le montant à échelonner.`, 'erreur');
+    if (!/^\d{4}-\d{2}$/.test(l.mois)) return message(`Mois ${i + 1} : choisis le premier mois.`, 'erreur');
 
     const reponse = prompt(`Répartir ${euros(total)} sur combien de mois, à partir de ${moisFr(l.mois)} ?`, '12');
     if (reponse === null) return;
@@ -269,17 +259,15 @@ export function afficherOperation(conteneur) {
 
     const part = Math.trunc(total / n);
     const mensualites = Array.from({ length: n }, (_, k) => ({
-      ...l,
       cle: ++compteur,
-      ids: [...l.ids],
       auto: false,
       moisAuto: false,
       mois: decalerMois(l.mois, k),
-      texte: montantPourSaisie(k === n - 1 ? total - part * (n - 1) : part), // les centimes sur la dernière
+      texte: montantPourSaisie(k === n - 1 ? total - part * (n - 1) : part), // les centimes sur le dernier mois
     }));
     lignes.splice(i, 1, ...mensualites);
     dessinerLignes();
-    message(`Ligne ${i + 1} répartie sur ${n} mois.`, 'succes');
+    message(`Montant réparti sur ${n} mois.`, 'succes');
   }
 
   function retirer(i) {
@@ -292,8 +280,11 @@ export function afficherOperation(conteneur) {
     const total = lireMontant($('montant').value) ?? 0;
     const somme = lignes.reduce((s, l) => s + (lireMontant(l.texte) ?? 0), 0);
     lignes.forEach(l => { l.auto = false; });
+    const derniere = lignes[lignes.length - 1];
     const l = nouvelleLigne();
     l.auto = false;
+    l.moisAuto = false;
+    if (derniere && /^\d{4}-\d{2}$/.test(derniere.mois)) l.mois = decalerMois(derniere.mois, 1); // mois suivant
     if (total - somme > 0) l.texte = montantPourSaisie(total - somme); // pré-remplit le reste
     lignes.push(l);
     dessinerLignes();
@@ -319,25 +310,24 @@ export function afficherOperation(conteneur) {
     const statut = $('statut').value;
     const date = $('date').value || null;
     const total = lireMontant($('montant').value);
-    const libelle = $('libelle').value.trim() || null;
-    const note = $('note').value.trim() || null;
+    const rubrique = rubriqueFeuille();
+    const detail = $('detail').value.trim() || null;
 
     if (!compteId) return message('Choisis un compte.', 'erreur');
     if (!total || total < 0) {
       return message('Saisis un montant positif (exemple : 45,90). Le sens est donné par « Dépense / Revenu ».', 'erreur');
     }
     if (statut === 'realisee' && !date) return message('La date banque est obligatoire pour une opération réalisée.', 'erreur');
+    if (!rubrique) return message("Choisis la rubrique jusqu'au dernier niveau.", 'erreur');
 
     const aEnregistrer = [];
     let somme = 0;
     for (const [i, l] of lignes.entries()) {
-      const rubrique = feuille(l);
       const montant = lireMontant(l.texte);
-      if (!rubrique) return message(`Ligne ${i + 1} : choisis la rubrique jusqu'au dernier niveau.`, 'erreur');
-      if (!montant) return message(`Ligne ${i + 1} : montant invalide.`, 'erreur');
-      if (!/^\d{4}-\d{2}$/.test(l.mois)) return message(`Ligne ${i + 1} : mois d'imputation manquant.`, 'erreur');
+      if (!montant) return message(`Mois ${i + 1} : montant invalide.`, 'erreur');
+      if (!/^\d{4}-\d{2}$/.test(l.mois)) return message(`Mois ${i + 1} : mois d'imputation manquant.`, 'erreur');
       somme += montant;
-      aEnregistrer.push({ rubrique, montant: sens * montant, detail: l.detail.trim() || null, mois: `${l.mois}-01` });
+      aEnregistrer.push({ montant: sens * montant, mois: `${l.mois}-01` });
     }
     if (somme !== total) {
       return message(`La répartition (${euros(somme)}) ne correspond pas au montant (${euros(total)}).`, 'erreur');
@@ -347,15 +337,15 @@ export function afficherOperation(conteneur) {
     try {
       db.executer('BEGIN');
       db.executer(
-        `INSERT INTO operations (compte_id, statut, montant_total, montant_estime, date_banque,
-                                 libelle_bancaire, mode_saisie, note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [compteId, statut, montantTotal, statut === 'prevue' ? montantTotal : null, date, libelle, MODE_SAISIE, note]);
+        `INSERT INTO operations (compte_id, statut, montant_total, montant_estime, date_banque, mode_saisie)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [compteId, statut, montantTotal, statut === 'prevue' ? montantTotal : null, date, MODE_SAISIE]);
       const id = db.lire('SELECT last_insert_rowid() AS id')[0].id;
+      // Même rubrique et même détail sur chaque mois
       aEnregistrer.forEach((l, i) => db.executer(
         `INSERT INTO lignes_operation (operation_id, rubrique_id, montant, libelle_detail, mois_imputation, ordre)
          VALUES (?, ?, ?, ?, ?, ?)`,
-        [id, l.rubrique, l.montant, l.detail, l.mois, i + 1]));
+        [id, rubrique, l.montant, detail, l.mois, i + 1]));
       db.executer('COMMIT');
     } catch (e) {
       try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }
@@ -363,15 +353,18 @@ export function afficherOperation(conteneur) {
     }
 
     Object.assign(memo, { compte: String(compteId), sens: String(sens), statut, date: date ?? '' });
-    await sauvegarder(`Opération de ${euros(montantTotal)} enregistrée (${aEnregistrer.length} ligne(s)).`);
+    const surMois = aEnregistrer.length > 1 ? `, sur ${aEnregistrer.length} mois` : '';
+    await sauvegarder(`Opération de ${euros(montantTotal)} enregistrée${surMois}.`);
   });
 
   // ---------- Dernières opérations ----------
   const recentes = db.lire(`
-    SELECT o.id, o.date_banque, o.statut, o.montant_total, o.libelle_bancaire, c.nom AS compte,
-           (SELECT COUNT(*) FROM lignes_operation l WHERE l.operation_id = o.id) AS nb_lignes,
+    SELECT o.id, o.date_banque, o.statut, o.montant_total, c.nom AS compte,
+           (SELECT COUNT(*) FROM lignes_operation l WHERE l.operation_id = o.id) AS nb_mois,
            (SELECT l.rubrique_id FROM lignes_operation l WHERE l.operation_id = o.id
-             ORDER BY l.ordre LIMIT 1) AS rubrique_id
+             ORDER BY l.ordre LIMIT 1) AS rubrique_id,
+           (SELECT l.libelle_detail FROM lignes_operation l WHERE l.operation_id = o.id
+             ORDER BY l.ordre LIMIT 1) AS detail
     FROM operations o
     JOIN comptes c ON c.id = o.compte_id
     ORDER BY o.id DESC
@@ -392,10 +385,10 @@ export function afficherOperation(conteneur) {
   for (const o of recentes) {
     const tr = document.createElement('tr');
     let rubrique = o.rubrique_id ? chemin(o.rubrique_id) : '—';
-    if (o.nb_lignes > 1) rubrique += ` (+${o.nb_lignes - 1} ligne(s))`;
+    if (o.nb_mois > 1) rubrique += ` (sur ${o.nb_mois} mois)`;
     const statut = STATUTS.find(s => s.valeur === o.statut)?.libelle ?? o.statut;
 
-    for (const valeur of [dateFr(o.date_banque), o.compte, o.libelle_bancaire ?? '—', rubrique]) {
+    for (const valeur of [dateFr(o.date_banque), o.compte, rubrique, o.detail ?? '—']) {
       tr.append(creer('td', null, valeur));
     }
     tr.append(
@@ -409,7 +402,7 @@ export function afficherOperation(conteneur) {
   }
 
   // ---------- Démarrage ----------
-  majStatut();
+  majCascade();
   lignes = [nouvelleLigne()];
   dessinerLignes();
   if (comptes.length > 0) $('montant').focus();
