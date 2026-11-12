@@ -1,6 +1,6 @@
 import * as db from '../db.js';
-import { afficherFormTransfert } from './transfert.js';
 import { message, euros, lireMontant, montantPourSaisie, dateFr } from '../outils.js';
+import { afficherFormTransfert } from './transfert.js';
 
 // ⚠️ Valeurs identiques aux CHECK de schema.sql
 const STATUTS = [
@@ -55,7 +55,7 @@ function bouton(texte, classes, action) {
   return b;
 }
 
-// Arbre des rubriques actives + chemin complet de n'importe quelle rubrique
+// Arbre des rubriques actives + chemin et ancêtres de n'importe quelle rubrique
 function chargerRubriques() {
   const toutes = db.lire('SELECT id, nom, parent_id, actif FROM rubriques');
   const parId = new Map(toutes.map(r => [r.id, { ...r, enfants: [] }]));
@@ -75,11 +75,16 @@ function chargerRubriques() {
     for (let r = parId.get(id); r; r = parId.get(r.parent_id)) noms.unshift(r.nom);
     return noms.join(' › ');
   };
-  return { racines, parId, chemin };
+  const ancetres = id => {
+    const ids = [];
+    for (let r = parId.get(id); r; r = parId.get(r.parent_id)) ids.unshift(r.id);
+    return ids;
+  };
+  return { racines, parId, chemin, ancetres };
 }
 
 export function afficherOperation(conteneur) {
-  const { racines, parId, chemin } = chargerRubriques();
+  const { racines, parId, chemin, ancetres } = chargerRubriques();
   const tousComptes = db.lire(
     'SELECT id, nom, type, compte_rattachement_id FROM comptes WHERE actif = 1 ORDER BY ordre_affichage, nom');
   const compteParId = new Map(tousComptes.map(c => [c.id, c]));
@@ -89,6 +94,16 @@ export function afficherOperation(conteneur) {
   // Comptes qui peuvent payer : les tiens d'abord, puis les comptes externes (avances)
   const payeurs = [...tousComptes.filter(c => c.type !== TYPE_EXTERNE),
                    ...tousComptes.filter(c => c.type === TYPE_EXTERNE)];
+
+  // Dépenses rapides actives
+  const rapides = db.lire('SELECT id, compte_id, rubrique_id, detail, montant FROM depenses_rapides WHERE actif = 1');
+  const rembsRapides = db.lire(
+    'SELECT depense_rapide_id, type, organisme, compte_id, montant FROM depenses_rapides_remb ORDER BY ordre, id');
+  for (const r of rapides) {
+    r.rembs = rembsRapides.filter(x => x.depense_rapide_id === r.id);
+    r.libelle = r.detail || chemin(r.rubrique_id);
+  }
+  rapides.sort((a, b) => a.libelle.localeCompare(b.libelle, 'fr', { sensitivity: 'base' }));
 
   // Étapes d'une dette : un compte externe passe toujours par son compte pivot
   // Renvoie [[débiteur, créancier], …] ou null si le compte externe n'a pas de pivot
@@ -105,7 +120,7 @@ export function afficherOperation(conteneur) {
 
   let rubriqueIds = []; // rubriques choisies : [N1, N2, N3]
   let lignes = [];      // répartition : { mois, texte }
-  let rembs = [];       // remboursements : { type, source, compteId, texte, date }
+  let rembs = [];       // remboursements : { type, source, compteId, texte, date, auto }
   let compteur = 0;
 
   conteneur.innerHTML = `
@@ -118,6 +133,12 @@ export function afficherOperation(conteneur) {
       </div>
       <div data-ref="bloc-transfert" hidden></div>
       <form data-ref="form" class="form-operation" novalidate>
+        <div class="grille" data-ref="bloc-rapide">
+          <label class="pleine">⚡ Dépense rapide
+            <select data-ref="rapide"></select>
+          </label>
+        </div>
+
         <div class="grille">
           <label>Compte (payé par) <select data-ref="compte"></select></label>
           <label>Sens
@@ -198,6 +219,14 @@ export function afficherOperation(conteneur) {
     message("Aucun compte actif : crée d'abord un compte dans « Gérer les comptes ».", 'erreur');
   }
 
+  // Liste des dépenses rapides
+  $('bloc-rapide').hidden = rapides.length === 0;
+  $('rapide').append(option('', '— Aucune (saisie libre) —'), ...rapides.map(r => {
+    const compte = compteParId.has(r.compte_id) ? nomCompte(r.compte_id) : 'compte inactif';
+    const montant = r.montant !== null ? ` · ${euros(r.montant)}` : '';
+    return option(String(r.id), `${r.libelle} · ${compte}${montant}`);
+  }));
+
   // Le mois d'imputation suit la date banque tant qu'on ne l'a pas modifié
   $('date').addEventListener('change', () => {
     for (const l of lignes) {
@@ -227,6 +256,7 @@ export function afficherOperation(conteneur) {
       lignes[0].champMontant.value = lignes[0].texte;
     }
     majReste();
+    majRembAuto();
     majNet();
   });
 
@@ -275,7 +305,7 @@ export function afficherOperation(conteneur) {
   // Rubrique utilisable = la dernière choisie, si elle n'a pas de sous-rubrique
   function rubriqueFeuille() {
     const r = parId.get(rubriqueIds[rubriqueIds.length - 1]);
-    return r && r.enfants.length === 0 ? r.id : null;
+    return r && r.actif && r.enfants.length === 0 ? r.id : null;
   }
 
   // ---------- Répartition par mois ----------
@@ -410,7 +440,8 @@ export function afficherOperation(conteneur) {
     montant.inputMode = 'decimal';
     montant.placeholder = '0,00';
     montant.value = r.texte;
-    montant.addEventListener('input', () => { r.texte = montant.value; majNet(); });
+    montant.addEventListener('input', () => { r.texte = montant.value; r.auto = false; majRembAuto(); majNet(); });
+    r.champMontant = montant;
 
     const date = document.createElement('input');
     date.type = 'date';
@@ -429,6 +460,16 @@ export function afficherOperation(conteneur) {
   function dessinerRembs() {
     $('rembs').replaceChildren(...rembs.map((r, i) => blocRemb(r, i)));
     majNet();
+  }
+
+  // Un remboursement « le reste » (venu d'une dépense rapide) suit le montant de la dépense
+  function majRembAuto() {
+    const auto = rembs.find(r => r.auto);
+    if (!auto) return;
+    const total = lireMontant($('montant').value) ?? 0;
+    const fixe = rembs.filter(r => !r.auto).reduce((s, r) => s + (lireMontant(r.texte) ?? 0), 0);
+    auto.texte = total - fixe > 0 ? montantPourSaisie(total - fixe) : '';
+    if (auto.champMontant) auto.champMontant.value = auto.texte;
   }
 
   function majNet() {
@@ -451,13 +492,59 @@ export function afficherOperation(conteneur) {
     const deja = rembs.reduce((s, r) => s + (lireMontant(r.texte) ?? 0), 0);
     const externe = estExterne(Number($('compte').value));
     rembs.push({
-      cle: ++compteur, type: externe ? 'compte' : 'organisme', source: '', compteId: '', date: '',
+      cle: ++compteur, type: externe ? 'compte' : 'organisme', source: '', compteId: '', date: '', auto: false,
       texte: total - deja > 0 ? montantPourSaisie(total - deja) : '',
     });
     dessinerRembs();
   });
 
   $('vider').addEventListener('click', () => afficherOperation(conteneur));
+
+  // ---------- Dépense rapide : pré-remplissage ----------
+  function appliquerRapide(id) {
+    const r = rapides.find(x => x.id === id);
+    if (!r) return;
+    const avertissements = [];
+
+    if (compteParId.has(r.compte_id)) $('compte').value = String(r.compte_id);
+    else avertissements.push('son compte est inactif');
+    $('sens').value = '-1';
+    majSens();
+
+    rubriqueIds = ancetres(r.rubrique_id);
+    if (!rubriqueIds.every(x => parId.get(x)?.actif)) rubriqueIds = [];
+    majCascade();
+    if (!rubriqueFeuille()) avertissements.push("sa rubrique n'est plus utilisable, choisis-la à nouveau");
+    $('detail').value = r.detail ?? '';
+
+    $('montant').value = r.montant !== null ? montantPourSaisie(r.montant) : '';
+    lignes = [nouvelleLigne()];
+    lignes[0].texte = $('montant').value;
+    dessinerLignes();
+
+    rembs = r.rembs.map(x => ({
+      cle: ++compteur,
+      type: x.type,
+      source: x.organisme ?? '',
+      compteId: x.compte_id && compteParId.has(x.compte_id) ? String(x.compte_id) : '',
+      date: '',
+      auto: x.montant === null,
+      texte: x.montant !== null ? montantPourSaisie(x.montant) : '',
+    }));
+    majRembAuto();
+    dessinerRembs();
+
+    if (avertissements.length > 0) {
+      message(`Dépense rapide « ${r.libelle} » : ${avertissements.join(' ; ')}.`, 'erreur');
+    } else {
+      message(`Dépense rapide « ${r.libelle} » appliquée : vérifie le montant et la date, puis enregistre.`, 'succes');
+    }
+    $('montant').focus();
+    $('montant').select();
+  }
+  $('rapide').addEventListener('change', () => {
+    if ($('rapide').value) appliquerRapide(Number($('rapide').value));
+  });
 
   // ---------- Enregistrement ----------
   async function sauvegarder(texteSucces) {
@@ -595,7 +682,7 @@ export function afficherOperation(conteneur) {
     await sauvegarder(`Opération de ${euros(sens * total)} enregistrée${surMois}${avecRemb}.`);
   });
 
-  // ---------- Dernières opérations (hors remboursements et dettes entre comptes) ----------
+  // ---------- Dernières opérations (hors remboursements et virements entre comptes) ----------
   const recentes = db.lire(`
     SELECT o.id, o.date_banque, o.statut, o.montant_total, o.compte_id, c.nom AS compte,
            (SELECT COUNT(*) FROM lignes_operation l WHERE l.operation_id = o.id) AS nb_mois,
@@ -710,6 +797,6 @@ export function afficherOperation(conteneur) {
   lignes = [nouvelleLigne()];
   dessinerLignes();
   dessinerRembs();
-     majMode();
-     if (memo.mode === 'operation') $('montant').focus();
+  majMode();
+  if (memo.mode === 'operation') $('montant').focus();
 }

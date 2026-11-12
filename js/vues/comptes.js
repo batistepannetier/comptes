@@ -201,6 +201,16 @@ export function afficherComptes(conteneur) {
         "Rattache-les d'abord à un autre compte courant.", 'erreur');
     }
 
+    // 2 bis. Refus si des dépenses rapides utilisent ce compte
+    const [{ nb_rapides }] = db.lire(
+      `SELECT (SELECT COUNT(*) FROM depenses_rapides WHERE compte_id = ?)
+            + (SELECT COUNT(*) FROM depenses_rapides_remb WHERE compte_id = ?) AS nb_rapides`, [c.id, c.id]);
+    if (nb_rapides > 0) {
+      return message(
+        `Impossible de supprimer « ${c.nom} » : ${nb_rapides} dépense(s) rapide(s) l'utilisent. ` +
+        'Modifie-les ou supprime-les d\'abord.', 'erreur');
+    }
+
     // 3. Confirmation (en signalant les règles d'import qui seront supprimées)
     const [{ nb_regles }] = db.lire(
       'SELECT COUNT(*) AS nb_regles FROM mapping_import WHERE compte_id = ?', [c.id]);

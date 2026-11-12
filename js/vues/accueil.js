@@ -8,7 +8,7 @@ const FONCTIONS = [
   { icone: '✍️', titre: 'Nouvelle dépense',            lien: '#/operation' },
   { icone: '🔎', titre: 'Suivi des opérations',        lien: '#/suivi' },
   { icone: '🔁', titre: 'Remboursements entre comptes', lien: '#/virements' },
-  { icone: '⚡', titre: 'Dépense rapide',              lien: null },
+  { icone: '⚡', titre: 'Gérer les dépenses rapides',  lien: '#/rapides' },
   { icone: '📥', titre: 'Importer un relevé bancaire', lien: null },
   { icone: '📅', titre: 'Préparer une nouvelle année', lien: null },
 ];

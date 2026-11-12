@@ -304,9 +304,12 @@ export function afficherRubriques(conteneur) {
     const [{ nb_lignes }] = db.lire(
       'SELECT COUNT(*) AS nb_lignes FROM lignes_operation WHERE rubrique_id = ?', [r.id]);
     if (nb_lignes > 0) {
+    const [{ nb_rapides }] = db.lire(
+      'SELECT COUNT(*) AS nb_rapides FROM depenses_rapides WHERE rubrique_id = ?', [r.id]);
+    if (nb_rapides > 0) {
       return message(
-        `Impossible de supprimer « ${r.nom} » : ${nb_lignes} ligne(s) d'opération l'utilisent. ` +
-        'Tu peux la désactiver à la place.', 'erreur');
+        `Impossible de supprimer « ${r.nom} » : ${nb_rapides} dépense(s) rapide(s) l'utilisent. ` +
+        'Modifie-les ou supprime-les d\'abord.', 'erreur');
     }
 
     const [{ nb_regles }] = db.lire(

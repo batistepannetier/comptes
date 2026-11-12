@@ -63,6 +63,27 @@ const MIGRATIONS = [
     }
     base.run('CREATE INDEX IF NOT EXISTS idx_operations_virement ON operations(virement_id)');
   },
+
+  // v3 → v4 : dépenses rapides et leurs remboursements
+  base => {
+    base.run(`CREATE TABLE IF NOT EXISTS depenses_rapides (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      compte_id    INTEGER NOT NULL REFERENCES comptes(id),
+      rubrique_id  INTEGER NOT NULL REFERENCES rubriques(id),
+      detail       TEXT,
+      montant      INTEGER CHECK (montant IS NULL OR montant > 0),
+      actif        INTEGER NOT NULL DEFAULT 1 CHECK (actif IN (0, 1)))`);
+    base.run(`CREATE TABLE IF NOT EXISTS depenses_rapides_remb (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      depense_rapide_id  INTEGER NOT NULL REFERENCES depenses_rapides(id) ON DELETE CASCADE,
+      type               TEXT    NOT NULL CHECK (type IN ('organisme', 'compte')),
+      organisme          TEXT,
+      compte_id          INTEGER REFERENCES comptes(id),
+      montant            INTEGER CHECK (montant IS NULL OR montant > 0),
+      ordre              INTEGER NOT NULL DEFAULT 0)`);
+    base.run('CREATE INDEX IF NOT EXISTS idx_rapides_remb ON depenses_rapides_remb(depense_rapide_id)');
+  },
+
 ];
 
 function migrer(base) {
