@@ -135,3 +135,5 @@ tr.selection td { background: color-mix(in srgb, var(--accent) 12%, transparent)
 
 input[type="checkbox"] { width: 1.1em; height: 1.1em; accent-color: var(--accent); }
 select:disabled { cursor: not-allowed; }
+
+.choix-mode { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }

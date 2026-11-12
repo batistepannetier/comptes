@@ -1,4 +1,5 @@
 import * as db from '../db.js';
+import { afficherFormTransfert } from './transfert.js';
 import { message, euros, lireMontant, montantPourSaisie, dateFr } from '../outils.js';
 
 // ⚠️ Valeurs identiques aux CHECK de schema.sql
@@ -11,7 +12,7 @@ const TYPE_EXTERNE = 'Externe';
 const ORGANISMES = ['Sécurité sociale', 'Mutuelle', 'Employeur (note de frais)'];
 
 // Conservés d'une saisie à l'autre
-const memo = { compte: '', sens: '-1', statut: 'realisee', date: '' };
+const memo = { compte: '', sens: '-1', statut: 'realisee', date: '', mode: 'operation' };
 
 const aujourdhui = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-JJ, heure locale
 const moisDe = iso => (iso || aujourdhui()).slice(0, 7);         // '2026-11-06' → '2026-11'
@@ -111,6 +112,11 @@ export function afficherOperation(conteneur) {
     <p><a href="#/" class="retour">← Retour à l'accueil</a></p>
     <section>
       <h2>Nouvelle opération</h2>
+      <div class="choix-mode" role="group" aria-label="Type d'opération">
+        <button type="button" data-ref="mode-operation">Entrée / dépense</button>
+        <button type="button" data-ref="mode-transfert">Virement entre comptes</button>
+      </div>
+      <div data-ref="bloc-transfert" hidden></div>
       <form data-ref="form" class="form-operation" novalidate>
         <div class="grille">
           <label>Compte (payé par) <select data-ref="compte"></select></label>
@@ -612,7 +618,7 @@ export function afficherOperation(conteneur) {
   async function supprimerOperation(o) {
     if (o.nb_regles > 0) {
       return message('Des remboursements de cette opération ont déjà été réglés par un virement. ' +
-                     "Annule d'abord ce virement dans « Virements entre comptes ».", 'erreur');
+                     "Annule d'abord ce virement dans « Remboursements entre comptes ».", 'erreur');
     }
     let question = `Supprimer l'opération de ${euros(o.montant_total)} du ${dateFr(o.date_banque)} (${o.compte}) ?`;
     if (o.nb_liees > 0) question += `\n\nSes ${o.nb_liees} opération(s) de remboursement seront aussi supprimées.`;
@@ -682,6 +688,21 @@ export function afficherOperation(conteneur) {
     }
   }
 
+  // ---------- Choix du formulaire ----------
+  afficherFormTransfert($('bloc-transfert'), sauvegarder);
+
+  function majMode() {
+    const transfert = memo.mode === 'transfert';
+    $('form').hidden = transfert;
+    $('bloc-transfert').hidden = !transfert;
+    $('mode-operation').className = transfert ? 'secondaire' : '';
+    $('mode-transfert').className = transfert ? '' : 'secondaire';
+    $('mode-operation').setAttribute('aria-pressed', String(!transfert));
+    $('mode-transfert').setAttribute('aria-pressed', String(transfert));
+  }
+  $('mode-operation').addEventListener('click', () => { memo.mode = 'operation'; majMode(); });
+  $('mode-transfert').addEventListener('click', () => { memo.mode = 'transfert'; majMode(); });
+
   // ---------- Démarrage ----------
   majCascade();
   majSens();
@@ -689,5 +710,6 @@ export function afficherOperation(conteneur) {
   lignes = [nouvelleLigne()];
   dessinerLignes();
   dessinerRembs();
-  $('montant').focus();
+     majMode();
+     if (memo.mode === 'operation') $('montant').focus();
 }
