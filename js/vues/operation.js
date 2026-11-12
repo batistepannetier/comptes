@@ -1,4 +1,4 @@
-import * as db from '../db.js';
+	import * as db from '../db.js';
 import { message, euros, lireMontant, montantPourSaisie, dateFr } from '../outils.js';
 
 // ⚠️ Valeurs identiques aux CHECK de schema.sql
@@ -178,6 +178,19 @@ export function afficherOperation(conteneur) {
       if (l.champMois) l.champMois.value = l.mois;
     }
   });
+
+  // Une dépense prévue n'a pas encore de date banque : on vide et on grise le champ
+  function majStatut() {
+    const prevue = $('statut').value === 'prevue';
+    $('date').disabled = prevue;
+    if (prevue) {
+      $('date').value = '';
+    } else if (!$('date').value) {
+      $('date').value = memo.date || aujourdhui();
+      $('date').dispatchEvent(new Event('change')); // le mois d'imputation suit la date
+    }
+  }
+  $('statut').addEventListener('change', majStatut);
 
   // Avec un seul mois, la ligne reprend automatiquement le montant total
   $('montant').addEventListener('input', () => {
@@ -439,7 +452,7 @@ export function afficherOperation(conteneur) {
     const compteId = Number($('compte').value);
     const sens = Number($('sens').value);
     const statut = $('statut').value;
-    const date = $('date').value || null;
+    const date = statut === 'prevue' ? null : ($('date').value || null);
     const total = lireMontant($('montant').value);
     const rubrique = rubriqueFeuille();
     const detail = $('detail').value.trim() || null;
@@ -520,7 +533,7 @@ export function afficherOperation(conteneur) {
       return message(`Enregistrement impossible : ${e.message}`, 'erreur');
     }
 
-    Object.assign(memo, { compte: String(compteId), sens: String(sens), statut, date: date ?? '' });
+    Object.assign(memo, { compte: String(compteId), sens: String(sens), statut, date: date ?? memo.date });
     const surMois = mensuel.length > 1 ? `, sur ${mensuel.length} mois` : '';
     const avecRemb = aRembourser.length > 0 ? `, avec ${aRembourser.length} remboursement(s)` : '';
     await sauvegarder(`Opération de ${euros(sens * total)} enregistrée${surMois}${avecRemb}.`);
@@ -560,11 +573,28 @@ export function afficherOperation(conteneur) {
     await sauvegarder('Opération supprimée.');
   }
 
+  // Remboursements liés aux dépenses affichées, regroupés par dépense
+  const ids = recentes.map(o => o.id);
+  const liees = new Map();
+  if (ids.length > 0) {
+    const lignesLiees = db.lire(`
+      SELECT r.id, r.operation_liee_id, r.date_banque, r.statut, r.montant_total, r.libelle_bancaire,
+             c.nom AS compte
+      FROM operations r
+      JOIN comptes c ON c.id = r.compte_id
+      WHERE r.operation_liee_id IN (${ids.map(() => '?').join(',')})
+      ORDER BY r.id`, ids);
+    for (const r of lignesLiees) {
+      if (!liees.has(r.operation_liee_id)) liees.set(r.operation_liee_id, []);
+      liees.get(r.operation_liee_id).push(r);
+    }
+  }
+  const libelleStatut = v => STATUTS.find(s => s.valeur === v)?.libelle ?? v;
+
   for (const o of recentes) {
     const tr = document.createElement('tr');
     let rubrique = o.rubrique_id ? chemin(o.rubrique_id) : '—';
     if (o.nb_mois > 1) rubrique += ` (sur ${o.nb_mois} mois)`;
-    const statut = STATUTS.find(s => s.valeur === o.statut)?.libelle ?? o.statut;
 
     for (const valeur of [dateFr(o.date_banque), o.compte, rubrique, o.detail ?? '—']) {
       tr.append(creer('td', null, valeur));
@@ -572,17 +602,34 @@ export function afficherOperation(conteneur) {
     tr.append(
       creer('td', o.montant_total < 0 ? 'num negatif' : 'num', euros(o.montant_total)),
       creer('td', 'num', o.rembourse ? euros(o.rembourse) : '—'),
-      creer('td', null, statut));
+      creer('td', null, libelleStatut(o.statut)));
 
     const tdActions = creer('td', 'col-actions');
     tdActions.append(bouton('Supprimer', 'petit danger', () => supprimerOperation(o)));
     tr.append(tdActions);
     $('recentes').append(tr);
+
+    // Lignes secondaires : un remboursement par ligne
+    for (const r of liees.get(o.id) ?? []) {
+      const sous = document.createElement('tr');
+      sous.className = 'sous-ligne';
+      sous.append(
+        creer('td', null, dateFr(r.date_banque)),
+        creer('td', null, r.compte),
+        creer('td', 'libelle-remb', `↳ ${r.libelle_bancaire ?? 'Remboursement'}`),
+        creer('td', null, ''),
+        creer('td', r.montant_total < 0 ? 'num negatif' : 'num', euros(r.montant_total)),
+        creer('td', null, ''),
+        creer('td', null, libelleStatut(r.statut)),
+        creer('td', 'col-actions', ''));
+      $('recentes').append(sous);
+    }
   }
 
   // ---------- Démarrage ----------
   majCascade();
   majSens();
+  majStatut();
   lignes = [nouvelleLigne()];
   dessinerLignes();
   dessinerRembs();
