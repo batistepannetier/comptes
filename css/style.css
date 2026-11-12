@@ -137,3 +137,6 @@ input[type="checkbox"] { width: 1.1em; height: 1.1em; accent-color: var(--accent
 select:disabled { cursor: not-allowed; }
 
 .choix-mode { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+
+.form-operation .grille + .grille { margin-top: 10px; }
+.form-operation .boutons-form { margin-top: 14px; }

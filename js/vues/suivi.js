@@ -53,38 +53,55 @@ function bouton(texte, classes, action) {
   return b;
 }
 
+// Toutes les rubriques (actives ou non) avec leurs enfants
 function chargerRubriques() {
-  const toutes = db.lire('SELECT id, nom, parent_id FROM rubriques');
+  const toutes = db.lire('SELECT id, nom, parent_id, actif FROM rubriques');
   const parId = new Map(toutes.map(r => [r.id, { ...r, enfants: [] }]));
   for (const r of parId.values()) parId.get(r.parent_id)?.enfants.push(r);
   const tri = (a, b) => a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
+  for (const r of parId.values()) r.enfants.sort(tri);
   const racines = [...parId.values()].filter(r => r.parent_id === null).sort(tri);
-  racines.forEach(r => r.enfants.sort(tri));
+
   const chemin = id => {
     const noms = [];
     for (let r = parId.get(id); r; r = parId.get(r.parent_id)) noms.unshift(r.nom);
     return noms.join(' › ');
   };
+  // [N1, N2, N3] menant à une rubrique
+  const ancetres = id => {
+    const ids = [];
+    for (let r = parId.get(id); r; r = parId.get(r.parent_id)) ids.unshift(r.id);
+    return ids;
+  };
   const descendants = id => {
     const r = parId.get(id);
     return r ? [r.id, ...r.enfants.flatMap(e => descendants(e.id))] : [];
   };
-  return { racines, chemin, descendants };
+  return { racines, parId, chemin, ancetres, descendants };
 }
 
 export function afficherSuivi(conteneur) {
-  const { racines, chemin, descendants } = chargerRubriques();
+  const { racines, parId, chemin, ancetres, descendants } = chargerRubriques();
   const comptes = db.lire('SELECT id, nom FROM comptes ORDER BY actif DESC, ordre_affichage, nom');
   let enEdition = null;
+  let rubriqueIds = []; // rubrique choisie dans le formulaire : [N1, N2, N3]
 
   conteneur.innerHTML = `
     <p><a href="#/" class="retour">← Retour à l'accueil</a></p>
     <section data-ref="bloc-edition" hidden>
       <h2 data-ref="titre-edition"></h2>
       <p class="discret aide" data-ref="infos-edition"></p>
-      <form data-ref="form" novalidate>
-        <label>Montant (€) <input data-ref="montant" type="text" inputmode="decimal"></label>
-        <label>Date banque (vide = prévue) <input data-ref="date" type="date"></label>
+      <form data-ref="form" class="form-operation" novalidate>
+        <div class="grille">
+          <label>Montant (€) <input data-ref="montant" type="text" inputmode="decimal"></label>
+          <label>Date banque (vide = prévue) <input data-ref="date" type="date"></label>
+        </div>
+        <div class="grille" data-ref="bloc-rubrique">
+          <label>Niveau 1 <select data-ref="n1"></select></label>
+          <label>Niveau 2 <select data-ref="n2"></select></label>
+          <label>Niveau 3 <select data-ref="n3"></select></label>
+          <label class="pleine">Détail <input data-ref="detail" type="text" maxlength="200"></label>
+        </div>
         <div class="boutons-form">
           <button type="submit">Enregistrer</button>
           <button type="button" class="secondaire" data-ref="aujourdhui">Passée aujourd'hui</button>
@@ -123,6 +140,16 @@ export function afficherSuivi(conteneur) {
       </div>
     </section>`;
   const $ = ref => conteneur.querySelector(`[data-ref="${ref}"]`);
+
+  async function sauvegarder(texte) {
+    try {
+      await db.enregistrer();
+      message(texte, 'succes');
+    } catch (e) {
+      message(`Modification faite, mais l'enregistrement du fichier a échoué : ${e.message}`, 'erreur');
+    }
+    afficherSuivi(conteneur);
+  }
 
   // ---------- Filtres ----------
   $('f-compte').append(option('', 'Tous les comptes'), ...comptes.map(c => option(String(c.id), c.nom)));
@@ -180,9 +207,12 @@ export function afficherSuivi(conteneur) {
 
     const ops = db.lire(`
       SELECT o.id, o.compte_id, c.nom AS compte, o.statut, o.montant_total, o.montant_estime,
-             o.date_banque, o.libelle_bancaire, o.operation_liee_id, o.contrepartie_id,
+             o.date_banque, o.libelle_bancaire, o.operation_liee_id, o.contrepartie_id, o.virement_id,
              MIN(l.mois_imputation) AS mois_debut, MAX(l.mois_imputation) AS mois_fin,
-             COUNT(l.id) AS nb_mois, MIN(l.rubrique_id) AS rubrique_id, MAX(l.libelle_detail) AS detail
+             COUNT(l.id) AS nb_mois, MIN(l.rubrique_id) AS rubrique_id, MAX(l.libelle_detail) AS detail,
+             (SELECT COUNT(*) FROM operations r WHERE r.operation_liee_id = o.id) AS nb_liees,
+             (SELECT COUNT(*) FROM operations r
+               WHERE r.operation_liee_id = o.id AND r.virement_id IS NOT NULL) AS nb_regles
       FROM operations o
       JOIN comptes c ON c.id = o.compte_id
       LEFT JOIN lignes_operation l ON l.operation_id = o.id
@@ -213,14 +243,58 @@ export function afficherSuivi(conteneur) {
         creer('td', null, STATUTS[o.statut] ?? o.statut));
 
       const tdActions = creer('td', 'col-actions');
-      if (o.contrepartie_id !== null) {
-        tdActions.append(creer('span', 'discret', 'Via les virements'));
+      const actions = creer('div', 'actions-ligne');
+      if (o.contrepartie_id === null) {
+        actions.append(
+          bouton(o.statut === 'prevue' ? 'Pointer' : 'Modifier', 'petit secondaire', () => ouvrirEdition(o)),
+          bouton('Supprimer', 'petit danger', () => supprimer(o)));
+      } else if (o.operation_liee_id === null && o.virement_id === null) {
+        // Virement saisi seul (contribution…), pas encore réglé : on peut le supprimer
+        actions.append(
+          creer('span', 'discret', 'Via les virements'),
+          bouton('Supprimer', 'petit danger', () => supprimer(o)));
       } else {
-        tdActions.append(bouton(o.statut === 'prevue' ? 'Pointer' : 'Modifier', 'petit secondaire', () => ouvrirEdition(o)));
+        actions.append(creer('span', 'discret', 'Via les virements'));
       }
+      tdActions.append(actions);
       tr.append(tdActions);
       return tr;
     }));
+  }
+
+  // ---------- Rubriques en cascade (formulaire) ----------
+  const selectsRubrique = [$('n1'), $('n2'), $('n3')];
+  // Rubriques actives, plus celles déjà choisies (même si elles ont été désactivées depuis)
+  const visibles = liste => liste.filter(r => r.actif || rubriqueIds.includes(r.id));
+
+  function majCascade() {
+    let liste = visibles(racines);
+    selectsRubrique.forEach((s, k) => {
+      s.replaceChildren();
+      if (!liste || liste.length === 0) {
+        s.append(option('', '—'));
+        s.disabled = true;
+        liste = null;
+        return;
+      }
+      s.disabled = false;
+      s.append(option('', 'Choisir…'),
+               ...liste.map(r => option(String(r.id), r.actif ? r.nom : `${r.nom} (inactive)`)));
+      const choisi = liste.find(r => r.id === rubriqueIds[k]);
+      s.value = choisi ? String(choisi.id) : '';
+      liste = choisi ? visibles(choisi.enfants) : null;
+    });
+  }
+  selectsRubrique.forEach((s, k) => s.addEventListener('change', () => {
+    rubriqueIds = rubriqueIds.slice(0, k);
+    if (s.value) rubriqueIds.push(Number(s.value));
+    majCascade();
+  }));
+
+  // Rubrique utilisable = la dernière choisie, si elle n'a pas de sous-rubrique active
+  function rubriqueFeuille() {
+    const r = parId.get(rubriqueIds[rubriqueIds.length - 1]);
+    return r && !r.enfants.some(e => e.actif) ? r.id : null;
   }
 
   // ---------- Pointage / modification ----------
@@ -230,14 +304,19 @@ export function afficherSuivi(conteneur) {
     $('titre-edition').textContent = o.statut === 'prevue' ? 'Pointer une opération prévue' : 'Modifier une opération';
     $('infos-edition').textContent = [
       o.compte,
-      o.rubrique_id ? chemin(o.rubrique_id) : null,
-      texteDetail(o) !== '—' ? texteDetail(o) : null,
+      o.libelle_bancaire,
       `imputation ${imputation(o)}`,
       o.montant_estime !== null ? `estimation initiale ${euros(Math.abs(o.montant_estime))}` : null,
       o.montant_total < 0 ? 'dépense' : 'revenu',
     ].filter(Boolean).join(' · ');
     $('montant').value = montantPourSaisie(Math.abs(o.montant_total));
     $('date').value = o.date_banque ?? '';
+
+    $('bloc-rubrique').hidden = o.nb_mois === 0; // sans ligne, pas de rubrique à modifier
+    rubriqueIds = o.rubrique_id ? ancetres(o.rubrique_id) : [];
+    majCascade();
+    $('detail').value = o.detail ?? '';
+
     dessiner(); // surligne la ligne en cours
     $('titre-edition').scrollIntoView({ behavior: 'smooth', block: 'start' });
     $('montant').focus({ preventScroll: true });
@@ -261,6 +340,11 @@ export function afficherSuivi(conteneur) {
       return message('Saisis un montant positif : le sens (dépense ou revenu) est conservé.', 'erreur');
     }
     const date = $('date').value || null;
+    const avecRubrique = o.nb_mois > 0;
+    const rubrique = avecRubrique ? rubriqueFeuille() : null;
+    const detail = $('detail').value.trim() || null;
+    if (avecRubrique && !rubrique) return message("Choisis la rubrique jusqu'au dernier niveau.", 'erreur');
+
     const signe = o.montant_total < 0 ? -1 : 1;
     const nouveau = signe * valeur;
     const ecart = nouveau - o.montant_total;
@@ -277,7 +361,7 @@ export function afficherSuivi(conteneur) {
         const debutMoisCourant = `${aujourdhui().slice(0, 7)}-01`;
         cibles = lignes.filter(l => l.mois_imputation >= debutMoisCourant);
         if (cibles.length === 0) {
-          cibles = [lignes[lignes.length - 1]];
+          cibles = lignes.slice(-1);
           avertissement = " Tous les mois étaient passés : l'écart a été imputé sur le dernier mois.";
         }
       }
@@ -295,23 +379,75 @@ export function afficherSuivi(conteneur) {
       db.executer('UPDATE operations SET montant_total = ?, date_banque = ?, statut = ? WHERE id = ?',
                   [nouveau, date, date ? 'realisee' : 'prevue', o.id]);
       for (const l of maj) db.executer('UPDATE lignes_operation SET montant = ? WHERE id = ?', [l.montant, l.id]);
+      if (avecRubrique) {
+        db.executer('UPDATE lignes_operation SET rubrique_id = ?, libelle_detail = ? WHERE operation_id = ?',
+                    [rubrique, detail, o.id]);
+        // Les remboursements d'une dépense suivent sa rubrique et son détail
+        if (o.operation_liee_id === null) {
+          db.executer(
+            `UPDATE lignes_operation SET rubrique_id = ?, libelle_detail = ?
+             WHERE operation_id IN (SELECT id FROM operations WHERE operation_liee_id = ?)`,
+            [rubrique, detail, o.id]);
+        }
+      }
       db.executer('COMMIT');
     } catch (e) {
       try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }
       return message(`Modification impossible : ${e.message}`, 'erreur');
     }
 
-    const texte = date
+    await sauvegarder(date
       ? `Opération de ${euros(nouveau)} pointée au ${dateFr(date)}.${avertissement}`
-      : `Opération mise à jour (${euros(nouveau)}, toujours prévue).${avertissement}`;
-    try {
-      await db.enregistrer();
-      message(texte, 'succes');
-    } catch (e) {
-      message(`Modification faite, mais l'enregistrement du fichier a échoué : ${e.message}`, 'erreur');
-    }
-    afficherSuivi(conteneur);
+      : `Opération mise à jour (${euros(nouveau)}, toujours prévue).${avertissement}`);
   });
+
+  // ---------- Suppression ----------
+  async function supprimer(o) {
+    let ids;
+    let question;
+    const libelle = `${euros(o.montant_total)} (${o.compte}${o.date_banque ? `, ${dateFr(o.date_banque)}` : ''})`;
+
+    if (o.contrepartie_id !== null) {
+      // Mouvement entre comptes
+      if (o.virement_id !== null) {
+        return message("Ce mouvement a déjà été réglé par un virement : annule d'abord ce virement " +
+                       'dans « Remboursements entre comptes ».', 'erreur');
+      }
+      if (o.operation_liee_id !== null) {
+        return message("Ce mouvement est le remboursement d'une dépense : supprime la dépense d'origine, " +
+                       'ses remboursements seront supprimés avec elle.', 'erreur');
+      }
+      ids = [o.id, o.contrepartie_id];
+      question = `Supprimer ce virement entre comptes de ${libelle} ?\n\nLes deux côtés du virement seront supprimés.`;
+    } else if (o.operation_liee_id === null) {
+      // Dépense ou revenu, avec ses éventuels remboursements
+      if (o.nb_regles > 0) {
+        return message('Des remboursements de cette opération ont déjà été réglés par un virement. ' +
+                       "Annule d'abord ce virement dans « Remboursements entre comptes ».", 'erreur');
+      }
+      ids = [o.id, ...db.lire('SELECT id FROM operations WHERE operation_liee_id = ?', [o.id]).map(r => r.id)];
+      question = `Supprimer l'opération de ${libelle} ?`;
+      if (o.nb_liees > 0) question += `\n\nSes ${o.nb_liees} opération(s) de remboursement seront aussi supprimées.`;
+    } else {
+      // Remboursement par un organisme
+      ids = [o.id];
+      question = `Supprimer ce remboursement de ${libelle} ?\n\nLa dépense d'origine est conservée.`;
+    }
+    if (!confirm(`${question}\n\nCette action est irréversible.`)) return;
+
+    const marques = ids.map(() => '?').join(',');
+    try {
+      db.executer('BEGIN');
+      db.executer(`UPDATE operations SET contrepartie_id = NULL WHERE id IN (${marques})`, ids);
+      db.executer(`DELETE FROM operations WHERE id IN (${marques})`, ids); // les lignes suivent (ON DELETE CASCADE)
+      db.executer('COMMIT');
+    } catch (e) {
+      try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }
+      return message(`Suppression impossible : ${e.message}`, 'erreur');
+    }
+    if (enEdition && ids.includes(enEdition.id)) enEdition = null;
+    await sauvegarder(ids.length > 1 ? `${ids.length} opérations supprimées.` : 'Opération supprimée.');
+  }
 
   appliquerFiltresAuxChamps();
   dessiner();
