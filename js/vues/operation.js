@@ -520,13 +520,14 @@ export function afficherOperation(conteneur) {
         } else {
           // Le compte source prend la dépense à sa charge…
           const source = Number(r.compteId);
-          inserer({ ...commun, compteId: source, montant: -r.montant,
+          const idSource = inserer({ ...commun, compteId: source, montant: -r.montant,
                     libelle: `Remboursement à ${nomCompte(compteId)}`, lignesMois: lignesRemb(r.montant, -1) });
           // … et le compte payeur est remboursé
-          inserer({ ...commun, compteId, montant: r.montant,
+          const idPayeur = inserer({ ...commun, compteId, montant: r.montant,
                     libelle: `Remboursement par ${nomCompte(source)}`, lignesMois: lignesRemb(r.montant, 1) });
-        }
-      }
+          db.executer('UPDATE operations SET contrepartie_id = ? WHERE id = ?', [idPayeur, idSource]);
+          db.executer('UPDATE operations SET contrepartie_id = ? WHERE id = ?', [idSource, idPayeur]);
+        }      }
       db.executer('COMMIT');
     } catch (e) {
       try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }

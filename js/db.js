@@ -19,6 +19,34 @@ const MIGRATIONS = [
     }
     base.run('CREATE INDEX IF NOT EXISTS idx_comptes_rattachement ON comptes(compte_rattachement_id)');
   },
+
+  // v1 → v2 : les deux côtés d'un mouvement entre comptes se référencent mutuellement
+  base => {
+    const colonnes = base.exec('PRAGMA table_info(operations)')[0].values.map(v => v[1]);
+    if (!colonnes.includes('contrepartie_id')) {
+      base.run('ALTER TABLE operations ADD COLUMN contrepartie_id INTEGER REFERENCES operations(id)');
+    }
+    base.run('CREATE INDEX IF NOT EXISTS idx_operations_contrepartie ON operations(contrepartie_id)');
+
+    // Rattrapage des remboursements entre comptes déjà saisis
+    const res = base.exec(`
+      SELECT a.id, b.id
+      FROM operations a
+      JOIN operations p ON p.id = a.operation_liee_id
+      JOIN operations b ON b.operation_liee_id = a.operation_liee_id
+                       AND b.compte_id = p.compte_id
+                       AND b.montant_total = -a.montant_total
+                       AND b.libelle_bancaire LIKE 'Remboursement par %'
+      WHERE a.compte_id <> p.compte_id
+        AND a.contrepartie_id IS NULL AND b.contrepartie_id IS NULL`);
+    const pris = new Set();
+    for (const [a, b] of res[0]?.values ?? []) {
+      if (pris.has(a) || pris.has(b)) continue;
+      pris.add(a); pris.add(b);
+      base.run('UPDATE operations SET contrepartie_id = ? WHERE id = ?', [b, a]);
+      base.run('UPDATE operations SET contrepartie_id = ? WHERE id = ?', [a, b]);
+    }
+  },
 ];
 
 function migrer(base) {

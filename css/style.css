@@ -131,3 +131,4 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 input:disabled { opacity: .5; cursor: not-allowed; }
 tr.sous-ligne td { font-size: .9em; color: var(--discret); border-bottom-style: dashed; }
 tr.sous-ligne td.libelle-remb { padding-left: 1.5em; }
+tr.selection td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
