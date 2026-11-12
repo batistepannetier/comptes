@@ -8,6 +8,7 @@ const TYPES = [
   { valeur: 'Externe', libelle: 'Externe' },
 ];
 const libelleType = v => TYPES.find(t => t.valeur === v)?.libelle ?? v;
+const AVEC_RATTACHEMENT = ['Epargne', 'Externe']; // épargne → compte courant ; externe → compte pivot
 
 export function afficherComptes(conteneur) {
   let enEdition = null; // id du compte en cours de modification
@@ -23,7 +24,7 @@ export function afficherComptes(conteneur) {
         <label>Type
           <select data-ref="type"></select>
         </label>
-        <label data-ref="bloc-rattachement" hidden>Rattaché à
+        <label data-ref="bloc-rattachement" hidden><span data-ref="libelle-rattachement">Rattaché à</span>
           <select data-ref="rattachement"></select>
         </label>
         <label>Solde initial (€)
@@ -62,7 +63,7 @@ export function afficherComptes(conteneur) {
   }
 
   // ---------- Données ----------
-  // Tri : chaque compte courant suivi de ses comptes épargne
+  // Tri : chaque compte courant suivi de ses comptes rattachés (épargne, externe)
   const comptes = db.lire(`
     SELECT c.id, c.nom, c.type, c.solde_initial, c.date_solde_initial, c.actif,
            c.compte_rattachement_id, p.nom AS rattachement_nom
@@ -130,7 +131,9 @@ export function afficherComptes(conteneur) {
   }
 
   function majBlocRattachement() {
-    $('bloc-rattachement').hidden = $('type').value !== 'Epargne';
+    const type = $('type').value;
+    $('bloc-rattachement').hidden = !AVEC_RATTACHEMENT.includes(type);
+    $('libelle-rattachement').textContent = type === 'Externe' ? 'Compte pivot' : 'Rattaché à';
   }
   $('type').addEventListener('change', majBlocRattachement);
 
@@ -172,7 +175,7 @@ export function afficherComptes(conteneur) {
 
   async function basculerActif(c) {
     if (c.actif && c.type === 'Courant' && nbRattaches(c.id) > 0 &&
-        !confirm(`Désactiver « ${c.nom} » ? Ses comptes épargne apparaîtront dans « Non rattachés » sur l'accueil.`)) {
+        !confirm(`Désactiver « ${c.nom} » ? Ses comptes rattachés (épargne, externe) apparaîtront dans « Non rattachés » sur l'accueil.`)) {
       return;
     }
     db.executer('UPDATE comptes SET actif = 1 - actif WHERE id = ?', [c.id]);
@@ -180,88 +183,4 @@ export function afficherComptes(conteneur) {
   }
 
   // ---------- Suppression ----------
-  async function supprimer(c) {
-    // 1. Refus si des opérations sont rattachées au compte
-    const [{ nb_operations }] = db.lire(
-      'SELECT COUNT(*) AS nb_operations FROM operations WHERE compte_id = ?', [c.id]);
-    if (nb_operations > 0) {
-      return message(
-        `Impossible de supprimer « ${c.nom} » : ${nb_operations} opération(s) y sont rattachées. ` +
-        'Tu peux le désactiver à la place.', 'erreur');
-    }
-
-    // 2. Refus si des comptes épargne y sont rattachés
-    const nb = nbRattaches(c.id);
-    if (nb > 0) {
-      return message(
-        `Impossible de supprimer « ${c.nom} » : ${nb} compte(s) épargne y sont rattachés. ` +
-        "Rattache-les d'abord à un autre compte courant.", 'erreur');
-    }
-
-    // 3. Confirmation (en signalant les règles d'import qui seront supprimées)
-    const [{ nb_regles }] = db.lire(
-      'SELECT COUNT(*) AS nb_regles FROM mapping_import WHERE compte_id = ?', [c.id]);
-    let question = `Supprimer définitivement le compte « ${c.nom} » ?`;
-    if (nb_regles > 0) {
-      question += `\n\n${nb_regles} règle(s) d'import liée(s) à ce compte seront aussi supprimées.`;
-    }
-    question += '\n\nCette action est irréversible.';
-    if (!confirm(question)) return;
-
-    // 4. Suppression dans une transaction : tout ou rien
-    try {
-      db.executer('BEGIN');
-      db.executer('DELETE FROM mapping_import WHERE compte_id = ?', [c.id]); // leurs lignes suivent (ON DELETE CASCADE)
-      db.executer('DELETE FROM comptes WHERE id = ?', [c.id]);
-      db.executer('COMMIT');
-    } catch (e) {
-      try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }
-      return message(`Suppression impossible : ${e.message}`, 'erreur');
-    }
-    await sauvegarder(`Compte « ${c.nom} » supprimé.`);
-  }
-
-  $('annuler').addEventListener('click', modeAjout);
-
-  $('form').addEventListener('submit', async evenement => {
-    evenement.preventDefault();
-    const nom = $('nom').value.trim();
-    const type = $('type').value;
-    const solde = lireMontant($('solde').value);
-    const date = $('date').value || null;
-    const rattachement = type === 'Epargne' && $('rattachement').value !== ''
-      ? Number($('rattachement').value) : null;
-
-    if (!nom) return message('Le nom du compte est obligatoire.', 'erreur');
-    if (solde === null) return message('Solde initial invalide (exemple : 1250,50).', 'erreur');
-    if (type === 'Epargne' && rattachement === null) {
-      return message("Choisis le compte courant de rattachement (crée-en un d'abord si besoin).", 'erreur');
-    }
-    if (enEdition !== null && type !== 'Courant') {
-      const nb = nbRattaches(enEdition);
-      if (nb > 0) {
-        return message(
-          `Ce compte a ${nb} compte(s) épargne rattaché(s) : il doit rester de type Courant.`, 'erreur');
-      }
-    }
-
-    try {
-      if (enEdition === null) {
-        db.executer(
-          `INSERT INTO comptes (nom, type, solde_initial, date_solde_initial, compte_rattachement_id, ordre_affichage)
-           VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(ordre_affichage), 0) + 1 FROM comptes))`,
-          [nom, type, solde, date, rattachement]);
-      } else {
-        db.executer(
-          `UPDATE comptes SET nom = ?, type = ?, solde_initial = ?, date_solde_initial = ?, compte_rattachement_id = ?
-           WHERE id = ?`,
-          [nom, type, solde, date, rattachement, enEdition]);
-      }
-    } catch (e) {
-      return message(e.message.includes('UNIQUE') ? `Un compte « ${nom} » existe déjà.` : `Erreur : ${e.message}`, 'erreur');
-    }
-    await sauvegarder(`Compte « ${nom} » ${enEdition === null ? 'ajouté' : 'modifié'} et enregistré.`);
-  });
-
-  modeAjout(); // état initial du formulaire
-}
+  async function supprimer

@@ -7,6 +7,7 @@ const FONCTIONS = [
   { icone: '🗂️', titre: 'Gérer les rubriques',         lien: '#/rubriques' },
   { icone: '✍️', titre: 'Nouvelle dépense',            lien: '#/operation' },
   { icone: '🔎', titre: 'Suivi des opérations',        lien: '#/suivi' },
+  { icone: '🔁', titre: 'Virements entre comptes',     lien: '#/virements' },
   { icone: '⚡', titre: 'Dépense rapide',              lien: null },
   { icone: '📥', titre: 'Importer un relevé bancaire', lien: null },
   { icone: '📅', titre: 'Préparer une nouvelle année', lien: null },
@@ -104,3 +105,4 @@ export function afficherAccueil(conteneur) {
     $('tuiles').append(tuile);
   }
 }
+

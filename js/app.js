@@ -6,6 +6,7 @@ import { afficherRubriques } from './vues/rubriques.js';
 import { afficherImportRubriques } from './vues/import-rubriques.js';
 import { afficherOperation } from './vues/operation.js';
 import { afficherSuivi } from './vues/suivi.js';
+import { afficherVirements } from './vues/virements.js';
 
 const ROUTES = {
   '': afficherAccueil,
@@ -14,6 +15,7 @@ const ROUTES = {
   'rubriques/import': afficherImportRubriques,
   'operation': afficherOperation,
   'suivi': afficherSuivi,
+  'virements': afficherVirements,
 };
 
 const routeCourante = () => location.hash.replace(/^#\/?/, '');

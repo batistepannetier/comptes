@@ -47,6 +47,23 @@ const MIGRATIONS = [
       base.run('UPDATE operations SET contrepartie_id = ? WHERE id = ?', [a, b]);
     }
   },
+
+  // v2 → v3 : virements qui règlent un lot de dettes entre deux comptes
+  base => {
+    base.run(`CREATE TABLE IF NOT EXISTS virements (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      compte_debiteur_id   INTEGER NOT NULL REFERENCES comptes(id),
+      compte_crediteur_id  INTEGER NOT NULL REFERENCES comptes(id),
+      montant              INTEGER NOT NULL CHECK (montant >= 0),
+      date_banque          TEXT    NOT NULL,
+      date_creation        TEXT    NOT NULL DEFAULT (datetime('now', 'localtime')))`);
+    const colonnes = base.exec('PRAGMA table_info(operations)')[0].values.map(v => v[1]);
+    if (!colonnes.includes('virement_id')) {
+      base.run('ALTER TABLE operations ADD COLUMN virement_id INTEGER REFERENCES virements(id)');
+    }
+    base.run('CREATE INDEX IF NOT EXISTS idx_operations_virement ON operations(virement_id)');
+  },
+
 ];
 
 function migrer(base) {
