@@ -8,6 +8,7 @@ import { afficherOperation } from './vues/operation.js';
 import { afficherSuivi } from './vues/suivi.js';
 import { afficherVirements } from './vues/virements.js';
 import { afficherRapides } from './vues/rapides.js';
+import { afficherImportRapides } from './vues/import-rapides.js';è
 
 const ROUTES = {
   '': afficherAccueil,
@@ -18,6 +19,7 @@ const ROUTES = {
   'suivi': afficherSuivi,
   'virements': afficherVirements,
   'rapides': afficherRapides,
+  'rapides/import': afficherImportRapides,
 };
 
 const routeCourante = () => location.hash.replace(/^#\/?/, '');

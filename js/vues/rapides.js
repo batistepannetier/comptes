@@ -102,7 +102,10 @@ export function afficherRapides(conteneur) {
       </form>
     </section>
     <section>
-      <h2>Dépenses rapides</h2>
+      <div class="entete-section">
+        <h2>Dépenses rapides</h2>
+        <a href="#/rapides/import" class="bouton-lien">📥 Importer depuis Excel</a>
+      </div>
       <p class="message" data-ref="vide" hidden>Aucune dépense rapide pour l'instant.</p>
       <div class="defilement">
         <table>
