@@ -94,7 +94,8 @@ tr.niveau-1 td { font-weight: 600; }
 /* En-tête de section avec lien d'action */
 .entete-section { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; }
 .entete-section h2 { margin: 0; }
-.bouton-lien { padding: 4px 10px; font-size: .85em; border: 1px solid var(--accent); border-radius: 6px; color: var(--accent); text-decoration: none; }
+.bouton-lien { padding: 4px 10px; font-size: .85em; line-height: inherit; border: 1px solid var(--accent); border-radius: 6px;
+               background: transparent; color: var(--accent); text-decoration: none; cursor: pointer; }
 
 /* Import de rubriques */
 textarea { font: inherit; font-family: Consolas, "Courier New", monospace; width: 100%; padding: 8px; resize: vertical;
