@@ -69,7 +69,8 @@ export function afficherRubriques(conteneur) {
       <div class="entete-section">
         <h2>Rubriques</h2>
         <a href="#/rubriques/import" class="bouton-lien">📥 Importer depuis Excel</a>
-      </div>      <div class="barre-outils">
+      </div>
+      <div class="barre-outils">
         <input data-ref="recherche" type="search" placeholder="Rechercher une rubrique…" aria-label="Rechercher une rubrique">
         <button type="button" class="petit secondaire" data-ref="tout-ouvrir">Tout déplier</button>
         <button type="button" class="petit secondaire" data-ref="tout-fermer">Tout replier</button>
@@ -296,22 +297,32 @@ export function afficherRubriques(conteneur) {
 
   // ---------- Suppression ----------
   async function supprimer(r) {
+    // 1. Refus si la rubrique a des sous-rubriques
     if (r.enfants.length > 0) {
       return message(
         `Impossible de supprimer « ${r.nom} » : elle contient ${r.enfants.length} sous-rubrique(s). ` +
         "Supprime-les ou déplace-les d'abord.", 'erreur');
     }
+
+    // 2. Refus si des opérations l'utilisent
     const [{ nb_lignes }] = db.lire(
       'SELECT COUNT(*) AS nb_lignes FROM lignes_operation WHERE rubrique_id = ?', [r.id]);
     if (nb_lignes > 0) {
+      return message(
+        `Impossible de supprimer « ${r.nom} » : ${nb_lignes} ligne(s) d'opération l'utilisent. ` +
+        'Tu peux la désactiver à la place.', 'erreur');
+    }
+
+    // 3. Refus si des dépenses rapides l'utilisent
     const [{ nb_rapides }] = db.lire(
       'SELECT COUNT(*) AS nb_rapides FROM depenses_rapides WHERE rubrique_id = ?', [r.id]);
     if (nb_rapides > 0) {
       return message(
         `Impossible de supprimer « ${r.nom} » : ${nb_rapides} dépense(s) rapide(s) l'utilisent. ` +
-        'Modifie-les ou supprime-les d\'abord.', 'erreur');
+        "Modifie-les ou supprime-les d'abord.", 'erreur');
     }
 
+    // 4. Confirmation (en signalant les règles d'import concernées)
     const [{ nb_regles }] = db.lire(
       'SELECT COUNT(*) AS nb_regles FROM mapping_import_lignes WHERE rubrique_id = ?', [r.id]);
     let question = `Supprimer définitivement la rubrique « ${r.chemin} » ?`;
@@ -319,6 +330,7 @@ export function afficherRubriques(conteneur) {
     question += '\n\nCette action est irréversible.';
     if (!confirm(question)) return;
 
+    // 5. Suppression dans une transaction : tout ou rien
     try {
       db.executer('BEGIN');
       db.executer('DELETE FROM mapping_import_lignes WHERE rubrique_id = ?', [r.id]);
@@ -349,6 +361,17 @@ export function afficherRubriques(conteneur) {
     const freres = parent ? parent.enfants : racines;
     if (freres.some(f => f.id !== enEdition?.id && normaliser(f.nom) === normaliser(nom))) {
       return message(`La rubrique « ${nom} » existe déjà à cet endroit.`, 'erreur');
+    }
+
+    // Règle de la feuille : on ne place pas de sous-rubrique sous une rubrique déjà utilisée
+    if (parentId !== null && parentId !== enEdition?.parent_id) {
+      const [{ nb }] = db.lire(
+        'SELECT COUNT(*) AS nb FROM lignes_operation WHERE rubrique_id = ?', [parentId]);
+      if (nb > 0) {
+        return message(
+          `Impossible : « ${parent.chemin} » est utilisée par ${nb} ligne(s) d'opération. ` +
+          'Elle doit rester une rubrique sans sous-rubrique.', 'erreur');
+      }
     }
 
     try {
