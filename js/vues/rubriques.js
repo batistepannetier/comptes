@@ -68,7 +68,10 @@ export function afficherRubriques(conteneur) {
     <section>
       <div class="entete-section">
         <h2>Rubriques</h2>
-        <a href="#/rubriques/import" class="bouton-lien">📥 Importer depuis Excel</a>
+        <div class="actions-ligne">
+          <a href="#/rubriques/import" class="bouton-lien">📥 Importer depuis Excel</a>
+          <button type="button" class="bouton-lien" data-ref="exporter">📤 Exporter vers Excel</button>
+        </div>
       </div>
       <div class="barre-outils">
         <input data-ref="recherche" type="search" placeholder="Rechercher une rubrique…" aria-label="Rechercher une rubrique">
@@ -204,6 +207,58 @@ export function afficherRubriques(conteneur) {
     dessinerListe();
   });
   $('tout-fermer').addEventListener('click', () => { ouverts.clear(); dessinerListe(); });
+
+  // ---------- Export ----------
+  // Liste des noms de N1 jusqu'à r (sans dépendre du séparateur « › »)
+  function cheminNoms(r) {
+    const noms = [];
+    for (let n = r; n; n = parId.get(n.parent_id)) noms.unshift(n.nom);
+    return noms;
+  }
+
+  function exporterRubriques() {
+    // Uniquement les rubriques sans sous-rubrique : ce sont les seules utilisables
+    const feuilles = noeuds.filter(r => r.enfants.length === 0);
+    if (feuilles.length === 0) return message('Aucune rubrique à exporter.', 'erreur');
+
+    const entetes = ['Niveau 1', 'Niveau 2', 'Niveau 3', 'Nature', 'Statut', 'Chemin'];
+    const lignes = feuilles.map(r => {
+      const noms = cheminNoms(r);
+      return [
+        noms[0] ?? '', noms[1] ?? '', noms[2] ?? '',
+        libelleNature(r.natureRacine),
+        r.actif ? 'Active' : 'Inactive',
+        r.chemin,
+      ];
+    });
+
+    const date = new Date().toLocaleDateString('sv'); // AAAA-MM-JJ, en date locale
+
+    if (window.XLSX) {
+      const XLSX = window.XLSX;
+      const feuille = XLSX.utils.aoa_to_sheet([entetes, ...lignes]);
+      feuille['!cols'] = [{ wch: 25 }, { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 10 }, { wch: 60 }];
+      feuille['!autofilter'] = { ref: feuille['!ref'] };
+      const classeur = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(classeur, feuille, 'Rubriques');
+      XLSX.writeFile(classeur, `rubriques_${date}.xlsx`);
+    } else {
+      // Repli CSV : « ; » + BOM UTF-8 pour qu'Excel FR l'ouvre correctement
+      const echapper = v => `"${String(v).replace(/"/g, '""')}"`;
+      const csv = [entetes, ...lignes].map(l => l.map(echapper).join(';')).join('\r\n');
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+      const lien = document.createElement('a');
+      lien.href = URL.createObjectURL(blob);
+      lien.download = `rubriques_${date}.csv`;
+      document.body.append(lien);
+      lien.click();
+      lien.remove();
+      URL.revokeObjectURL(lien.href);
+    }
+    message(`${feuilles.length} rubrique(s) exportée(s).`, 'succes');
+  }
+
+  $('exporter').addEventListener('click', exporterRubriques);
 
   // ---------- Formulaire ----------
   function remplirParents(r = null, valeur = null) {
