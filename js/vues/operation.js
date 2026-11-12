@@ -8,6 +8,7 @@ const STATUTS = [
 ];
 const MODE_SAISIE = 'formulaire';
 const TYPE_EXTERNE = 'Externe';
+const ORGANISMES = ['Sécurité sociale', 'Mutuelle', 'Employeur (note de frais)'];
 
 // Conservés d'une saisie à l'autre
 const memo = { compte: '', sens: '-1', statut: 'realisee', date: '' };
@@ -19,6 +20,14 @@ function decalerMois(mois, n) {
   const [a, m] = mois.split('-').map(Number);
   const d = new Date(a, m - 1 + n, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// Répartit un montant (centimes) au prorata de poids ; les centimes restants vont sur le dernier
+function repartir(montant, poids) {
+  const totalPoids = poids.reduce((s, p) => s + p, 0);
+  const parts = poids.map(p => Math.trunc(montant * p / totalPoids));
+  parts[parts.length - 1] += montant - parts.reduce((s, p) => s + p, 0);
+  return parts;
 }
 
 function creer(balise, classe, texte) {
@@ -70,10 +79,14 @@ function chargerRubriques() {
 
 export function afficherOperation(conteneur) {
   const { racines, parId, chemin } = chargerRubriques();
-  const comptes = db.lire(
-    'SELECT id, nom FROM comptes WHERE actif = 1 AND type <> ? ORDER BY ordre_affichage, nom', [TYPE_EXTERNE]);
+  const tousComptes = db.lire(
+    'SELECT id, nom, type FROM comptes WHERE actif = 1 ORDER BY ordre_affichage, nom');
+  const comptes = tousComptes.filter(c => c.type !== TYPE_EXTERNE); // comptes qui peuvent payer
+  const nomCompte = id => tousComptes.find(c => c.id === id)?.nom ?? '?';
+
   let rubriqueIds = []; // rubriques choisies : [N1, N2, N3]
   let lignes = [];      // répartition : { mois, texte }
+  let rembs = [];       // remboursements : { type, source, compteId, texte, date }
   let compteur = 0;
 
   conteneur.innerHTML = `
@@ -111,6 +124,20 @@ export function afficherOperation(conteneur) {
           <span data-ref="reste" class="reste" aria-live="polite"></span>
         </div>
 
+        <div data-ref="bloc-remb">
+          <h3>Remboursements attendus</h3>
+          <p class="discret aide">
+            Sécu, mutuelle, note de frais… ou un autre compte (par exemple le Compte Commun pour des courses communes).
+            Sans date banque, le remboursement est enregistré comme prévu.
+          </p>
+          <div data-ref="rembs"></div>
+          <div class="pied-lignes">
+            <button type="button" class="petit secondaire" data-ref="ajout-remb">+ Ajouter un remboursement</button>
+            <span data-ref="net" class="reste" aria-live="polite"></span>
+          </div>
+          <datalist id="liste-organismes"></datalist>
+        </div>
+
         <div class="boutons-form">
           <button type="submit">Enregistrer</button>
           <button type="button" class="secondaire" data-ref="vider">Vider le formulaire</button>
@@ -124,7 +151,7 @@ export function afficherOperation(conteneur) {
         <table>
           <thead><tr>
             <th>Date banque</th><th>Compte</th><th>Rubrique</th><th>Détail</th>
-            <th class="num">Montant</th><th>Statut</th><th class="col-actions">Actions</th>
+            <th class="num">Montant</th><th class="num">Remboursé</th><th>Statut</th><th class="col-actions">Actions</th>
           </tr></thead>
           <tbody data-ref="recentes"></tbody>
         </table>
@@ -135,6 +162,7 @@ export function afficherOperation(conteneur) {
   // ---------- En-tête de l'opération ----------
   $('compte').append(option('', '— Choisir un compte —'), ...comptes.map(c => option(String(c.id), c.nom)));
   for (const s of STATUTS) $('statut').append(option(s.valeur, s.libelle));
+  conteneur.querySelector('#liste-organismes').append(...ORGANISMES.map(o => option(o, o)));
   $('compte').value = comptes.some(c => String(c.id) === memo.compte) ? memo.compte
                     : comptes.length === 1 ? String(comptes[0].id) : '';
   $('sens').value = memo.sens;
@@ -158,7 +186,15 @@ export function afficherOperation(conteneur) {
       lignes[0].champMontant.value = lignes[0].texte;
     }
     majReste();
+    majNet();
   });
+
+  // Les remboursements n'existent que pour une dépense
+  function majSens() {
+    $('bloc-remb').hidden = $('sens').value !== '-1';
+  }
+  $('sens').addEventListener('change', majSens);
+  $('compte').addEventListener('change', dessinerRembs); // le compte payeur est exclu des sources
 
   // ---------- Rubriques en cascade ----------
   const selectsRubrique = [$('n1'), $('n2'), $('n3')];
@@ -290,6 +326,86 @@ export function afficherOperation(conteneur) {
     dessinerLignes();
   });
 
+  // ---------- Remboursements ----------
+  function blocRemb(r, i) {
+    const bloc = creer('div', 'ligne ligne-remb');
+
+    const type = document.createElement('select');
+    type.append(option('organisme', 'Organisme / employeur'), option('compte', 'Un autre compte'));
+    type.value = r.type;
+    type.addEventListener('change', () => { r.type = type.value; dessinerRembs(); });
+
+    let source;
+    if (r.type === 'organisme') {
+      source = document.createElement('input');
+      source.type = 'text';
+      source.maxLength = 60;
+      source.placeholder = 'Mutuelle';
+      source.setAttribute('list', 'liste-organismes');
+      source.value = r.source;
+      source.addEventListener('input', () => { r.source = source.value; });
+    } else {
+      source = document.createElement('select');
+      source.append(option('', '— Choisir —'));
+      const payeur = Number($('compte').value);
+      for (const c of tousComptes) {
+        if (c.id !== payeur) source.append(option(String(c.id), c.nom));
+      }
+      source.value = r.compteId;
+      source.addEventListener('change', () => { r.compteId = source.value; });
+    }
+
+    const montant = document.createElement('input');
+    montant.type = 'text';
+    montant.inputMode = 'decimal';
+    montant.placeholder = '0,00';
+    montant.value = r.texte;
+    montant.addEventListener('input', () => { r.texte = montant.value; majNet(); });
+
+    const date = document.createElement('input');
+    date.type = 'date';
+    date.value = r.date;
+    date.addEventListener('change', () => { r.date = date.value; });
+
+    bloc.append(
+      champ('Remboursé par', type),
+      champ(r.type === 'organisme' ? 'Organisme' : 'Compte', source),
+      champ('Montant (€)', montant),
+      champ('Date banque (facultatif)', date),
+      bouton('Retirer', 'petit danger', () => { rembs.splice(i, 1); dessinerRembs(); }));
+    return bloc;
+  }
+
+  function dessinerRembs() {
+    $('rembs').replaceChildren(...rembs.map((r, i) => blocRemb(r, i)));
+    majNet();
+  }
+
+  function majNet() {
+    const zone = $('net');
+    const afficher = (texte, classe) => { zone.textContent = texte; zone.className = `reste ${classe}`; };
+    if (rembs.length === 0) return afficher('', '');
+    const total = lireMontant($('montant').value) ?? 0;
+    let somme = 0;
+    for (const r of rembs) {
+      const m = lireMontant(r.texte);
+      if (m === null) return afficher('Un montant de remboursement est invalide.', 'erreur');
+      somme += m;
+    }
+    if (somme > total) afficher(`Remboursements supérieurs à la dépense de ${euros(somme - total)}`, 'erreur');
+    else afficher(`Reste à ta charge : ${euros(total - somme)}`, 'succes');
+  }
+
+  $('ajout-remb').addEventListener('click', () => {
+    const total = lireMontant($('montant').value) ?? 0;
+    const deja = rembs.reduce((s, r) => s + (lireMontant(r.texte) ?? 0), 0);
+    rembs.push({
+      cle: ++compteur, type: 'organisme', source: '', compteId: '', date: '',
+      texte: total - deja > 0 ? montantPourSaisie(total - deja) : '',
+    });
+    dessinerRembs();
+  });
+
   $('vider').addEventListener('click', () => afficherOperation(conteneur));
 
   // ---------- Enregistrement ----------
@@ -301,6 +417,21 @@ export function afficherOperation(conteneur) {
       message(`Modification faite, mais l'enregistrement du fichier a échoué : ${e.message}`, 'erreur');
     }
     afficherOperation(conteneur);
+  }
+
+  // Crée une opération et ses lignes ; renvoie son id
+  function inserer({ compteId, statut, montant, date, libelle, lieeA, rubrique, detail, lignesMois }) {
+    db.executer(
+      `INSERT INTO operations (compte_id, statut, montant_total, montant_estime, date_banque,
+                               libelle_bancaire, mode_saisie, operation_liee_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [compteId, statut, montant, statut === 'prevue' ? montant : null, date, libelle, MODE_SAISIE, lieeA]);
+    const id = db.lire('SELECT last_insert_rowid() AS id')[0].id;
+    lignesMois.forEach((l, i) => db.executer(
+      `INSERT INTO lignes_operation (operation_id, rubrique_id, montant, libelle_detail, mois_imputation, ordre)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, rubrique, l.montant, detail, l.mois, i + 1]));
+    return id;
   }
 
   $('form').addEventListener('submit', async evenement => {
@@ -320,32 +451,69 @@ export function afficherOperation(conteneur) {
     if (statut === 'realisee' && !date) return message('La date banque est obligatoire pour une opération réalisée.', 'erreur');
     if (!rubrique) return message("Choisis la rubrique jusqu'au dernier niveau.", 'erreur');
 
-    const aEnregistrer = [];
+    // Répartition par mois
+    const mensuel = [];
     let somme = 0;
     for (const [i, l] of lignes.entries()) {
       const montant = lireMontant(l.texte);
       if (!montant) return message(`Mois ${i + 1} : montant invalide.`, 'erreur');
       if (!/^\d{4}-\d{2}$/.test(l.mois)) return message(`Mois ${i + 1} : mois d'imputation manquant.`, 'erreur');
       somme += montant;
-      aEnregistrer.push({ montant: sens * montant, mois: `${l.mois}-01` });
+      mensuel.push({ montant, mois: `${l.mois}-01` });
     }
     if (somme !== total) {
       return message(`La répartition (${euros(somme)}) ne correspond pas au montant (${euros(total)}).`, 'erreur');
     }
 
-    const montantTotal = sens * total;
+    // Remboursements (dépense uniquement)
+    const aRembourser = [];
+    if (sens === -1) {
+      let totalRemb = 0;
+      for (const [i, r] of rembs.entries()) {
+        const montant = lireMontant(r.texte);
+        if (!montant || montant < 0) return message(`Remboursement ${i + 1} : montant invalide.`, 'erreur');
+        if (r.type === 'organisme' && !r.source.trim()) {
+          return message(`Remboursement ${i + 1} : indique l'organisme.`, 'erreur');
+        }
+        if (r.type === 'compte' && (!r.compteId || Number(r.compteId) === compteId)) {
+          return message(`Remboursement ${i + 1} : choisis un autre compte que le compte payeur.`, 'erreur');
+        }
+        totalRemb += montant;
+        aRembourser.push({ ...r, montant, statut: r.date ? 'realisee' : 'prevue', date: r.date || null });
+      }
+      if (totalRemb > total) return message('Les remboursements dépassent le montant de la dépense.', 'erreur');
+    }
+
+    // Les remboursements sont imputés sur les mêmes mois que la dépense, au prorata
+    const poids = mensuel.map(l => l.montant);
+    const lignesRemb = (montant, signe) =>
+      repartir(montant, poids)
+        .map((p, k) => ({ montant: signe * p, mois: mensuel[k].mois }))
+        .filter(l => l.montant !== 0);
+
     try {
       db.executer('BEGIN');
-      db.executer(
-        `INSERT INTO operations (compte_id, statut, montant_total, montant_estime, date_banque, mode_saisie)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [compteId, statut, montantTotal, statut === 'prevue' ? montantTotal : null, date, MODE_SAISIE]);
-      const id = db.lire('SELECT last_insert_rowid() AS id')[0].id;
-      // Même rubrique et même détail sur chaque mois
-      aEnregistrer.forEach((l, i) => db.executer(
-        `INSERT INTO lignes_operation (operation_id, rubrique_id, montant, libelle_detail, mois_imputation, ordre)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [id, rubrique, l.montant, detail, l.mois, i + 1]));
+      const id = inserer({
+        compteId, statut, montant: sens * total, date, libelle: null, lieeA: null, rubrique, detail,
+        lignesMois: mensuel.map(l => ({ montant: sens * l.montant, mois: l.mois })),
+      });
+
+      for (const r of aRembourser) {
+        const commun = { statut: r.statut, date: r.date, lieeA: id, rubrique, detail };
+        if (r.type === 'organisme') {
+          // L'organisme rembourse le compte payeur
+          inserer({ ...commun, compteId, montant: r.montant, libelle: `Remboursement ${r.source.trim()}`,
+                    lignesMois: lignesRemb(r.montant, 1) });
+        } else {
+          // Le compte source prend la dépense à sa charge…
+          const source = Number(r.compteId);
+          inserer({ ...commun, compteId: source, montant: -r.montant,
+                    libelle: `Remboursement à ${nomCompte(compteId)}`, lignesMois: lignesRemb(r.montant, -1) });
+          // … et le compte payeur est remboursé
+          inserer({ ...commun, compteId, montant: r.montant,
+                    libelle: `Remboursement par ${nomCompte(source)}`, lignesMois: lignesRemb(r.montant, 1) });
+        }
+      }
       db.executer('COMMIT');
     } catch (e) {
       try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }
@@ -353,30 +521,40 @@ export function afficherOperation(conteneur) {
     }
 
     Object.assign(memo, { compte: String(compteId), sens: String(sens), statut, date: date ?? '' });
-    const surMois = aEnregistrer.length > 1 ? `, sur ${aEnregistrer.length} mois` : '';
-    await sauvegarder(`Opération de ${euros(montantTotal)} enregistrée${surMois}.`);
+    const surMois = mensuel.length > 1 ? `, sur ${mensuel.length} mois` : '';
+    const avecRemb = aRembourser.length > 0 ? `, avec ${aRembourser.length} remboursement(s)` : '';
+    await sauvegarder(`Opération de ${euros(sens * total)} enregistrée${surMois}${avecRemb}.`);
   });
 
-  // ---------- Dernières opérations ----------
+  // ---------- Dernières opérations (hors remboursements) ----------
   const recentes = db.lire(`
-    SELECT o.id, o.date_banque, o.statut, o.montant_total, c.nom AS compte,
+    SELECT o.id, o.date_banque, o.statut, o.montant_total, o.compte_id, c.nom AS compte,
            (SELECT COUNT(*) FROM lignes_operation l WHERE l.operation_id = o.id) AS nb_mois,
            (SELECT l.rubrique_id FROM lignes_operation l WHERE l.operation_id = o.id
              ORDER BY l.ordre LIMIT 1) AS rubrique_id,
            (SELECT l.libelle_detail FROM lignes_operation l WHERE l.operation_id = o.id
-             ORDER BY l.ordre LIMIT 1) AS detail
+             ORDER BY l.ordre LIMIT 1) AS detail,
+           (SELECT COUNT(*) FROM operations r WHERE r.operation_liee_id = o.id) AS nb_liees,
+           (SELECT SUM(r.montant_total) FROM operations r
+             WHERE r.operation_liee_id = o.id AND r.compte_id = o.compte_id) AS rembourse
     FROM operations o
     JOIN comptes c ON c.id = o.compte_id
+    WHERE o.operation_liee_id IS NULL
     ORDER BY o.id DESC
     LIMIT 15`);
   $('vide').hidden = recentes.length > 0;
 
   async function supprimerOperation(o) {
-    if (!confirm(`Supprimer l'opération de ${euros(o.montant_total)} du ${dateFr(o.date_banque)} (${o.compte}) ?` +
-                 '\n\nCette action est irréversible.')) return;
+    let question = `Supprimer l'opération de ${euros(o.montant_total)} du ${dateFr(o.date_banque)} (${o.compte}) ?`;
+    if (o.nb_liees > 0) question += `\n\nSes ${o.nb_liees} opération(s) de remboursement seront aussi supprimées.`;
+    if (!confirm(`${question}\n\nCette action est irréversible.`)) return;
     try {
-      db.executer('DELETE FROM operations WHERE id = ?', [o.id]); // ses lignes suivent (ON DELETE CASCADE)
+      db.executer('BEGIN');
+      db.executer('DELETE FROM operations WHERE operation_liee_id = ?', [o.id]);
+      db.executer('DELETE FROM operations WHERE id = ?', [o.id]); // les lignes suivent (ON DELETE CASCADE)
+      db.executer('COMMIT');
     } catch (e) {
+      try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }
       return message(`Suppression impossible : ${e.message}`, 'erreur');
     }
     await sauvegarder('Opération supprimée.');
@@ -393,6 +571,7 @@ export function afficherOperation(conteneur) {
     }
     tr.append(
       creer('td', o.montant_total < 0 ? 'num negatif' : 'num', euros(o.montant_total)),
+      creer('td', 'num', o.rembourse ? euros(o.rembourse) : '—'),
       creer('td', null, statut));
 
     const tdActions = creer('td', 'col-actions');
@@ -403,7 +582,9 @@ export function afficherOperation(conteneur) {
 
   // ---------- Démarrage ----------
   majCascade();
+  majSens();
   lignes = [nouvelleLigne()];
   dessinerLignes();
+  dessinerRembs();
   if (comptes.length > 0) $('montant').focus();
 }

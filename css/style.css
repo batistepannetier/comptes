@@ -124,3 +124,7 @@ td.num, th.num { text-align: right; white-space: nowrap; }
 .form-operation h3 { margin: 18px 0 8px; }
 .ligne { grid-template-columns: minmax(150px, 220px) minmax(120px, 180px) auto; }
 @media (max-width: 520px) { .ligne { grid-template-columns: 1fr; } }
+
+/* Remboursements */
+.ligne.ligne-remb { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.aide { margin: 0 0 8px; font-size: .9em; }
