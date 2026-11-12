@@ -11,16 +11,16 @@ let handle = null;  // fichier sur le disque
 // MIGRATIONS[n] fait passer la base de la version n à la version n+1.
 // Chaque migration doit pouvoir être rejouée sans erreur.
 const MIGRATIONS = [
-  // v0 → v1 : rattachement des comptes épargne à un compte courant
+  // v0 → v1
   base => {
     const colonnes = base.exec('PRAGMA table_info(comptes)')[0].values.map(v => v[1]);
     if (!colonnes.includes('compte_rattachement_id')) {
       base.run('ALTER TABLE comptes ADD COLUMN compte_rattachement_id INTEGER REFERENCES comptes(id)');
     }
     base.run('CREATE INDEX IF NOT EXISTS idx_comptes_rattachement ON comptes(compte_rattachement_id)');
-  },
+  },   // ← virgule obligatoire
 
-  // v1 → v2 : les deux côtés d'un mouvement entre comptes se référencent mutuellement
+  // v1 → v2
   base => {
     const colonnes = base.exec('PRAGMA table_info(operations)')[0].values.map(v => v[1]);
     if (!colonnes.includes('contrepartie_id')) {
@@ -48,7 +48,7 @@ const MIGRATIONS = [
     }
   },
 
-  // v2 → v3 : virements qui règlent un lot de dettes entre deux comptes
+  // v2 → v3
   base => {
     base.run(`CREATE TABLE IF NOT EXISTS virements (
       id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -63,13 +63,13 @@ const MIGRATIONS = [
     }
     base.run('CREATE INDEX IF NOT EXISTS idx_operations_virement ON operations(virement_id)');
   },
-
 ];
 
 function migrer(base) {
   let version = base.exec('PRAGMA user_version')[0].values[0][0];
   while (version < MIGRATIONS.length) {
-    MIGRATIONS[version](base);
+    const etape = MIGRATIONS[version]; // la migration qui fait passer à la version suivante
+    etape(base);                        // on l'exécute sur la base
     version++;
     base.run(`PRAGMA user_version = ${version}`);
   }

@@ -183,4 +183,90 @@ export function afficherComptes(conteneur) {
   }
 
   // ---------- Suppression ----------
-  async function supprimer
+  async function supprimer(c) {
+    // 1. Refus si des opérations sont rattachées au compte
+    const [{ nb_operations }] = db.lire(
+      'SELECT COUNT(*) AS nb_operations FROM operations WHERE compte_id = ?', [c.id]);
+    if (nb_operations > 0) {
+      return message(
+        `Impossible de supprimer « ${c.nom} » : ${nb_operations} opération(s) y sont rattachées. ` +
+        'Tu peux le désactiver à la place.', 'erreur');
+    }
+
+    // 2. Refus si des comptes (épargne ou externe) y sont rattachés
+    const nb = nbRattaches(c.id);
+    if (nb > 0) {
+      return message(
+        `Impossible de supprimer « ${c.nom} » : ${nb} compte(s) y sont rattachés (épargne ou externe). ` +
+        "Rattache-les d'abord à un autre compte courant.", 'erreur');
+    }
+
+    // 3. Confirmation (en signalant les règles d'import qui seront supprimées)
+    const [{ nb_regles }] = db.lire(
+      'SELECT COUNT(*) AS nb_regles FROM mapping_import WHERE compte_id = ?', [c.id]);
+    let question = `Supprimer définitivement le compte « ${c.nom} » ?`;
+    if (nb_regles > 0) {
+      question += `\n\n${nb_regles} règle(s) d'import liée(s) à ce compte seront aussi supprimées.`;
+    }
+    question += '\n\nCette action est irréversible.';
+    if (!confirm(question)) return;
+
+    // 4. Suppression dans une transaction : tout ou rien
+    try {
+      db.executer('BEGIN');
+      db.executer('DELETE FROM mapping_import WHERE compte_id = ?', [c.id]); // leurs lignes suivent (ON DELETE CASCADE)
+      db.executer('DELETE FROM comptes WHERE id = ?', [c.id]);
+      db.executer('COMMIT');
+    } catch (e) {
+      try { db.executer('ROLLBACK'); } catch { /* aucune transaction en cours */ }
+      return message(`Suppression impossible : ${e.message}`, 'erreur');
+    }
+    await sauvegarder(`Compte « ${c.nom} » supprimé.`);
+  }
+
+  $('annuler').addEventListener('click', modeAjout);
+
+  $('form').addEventListener('submit', async evenement => {
+    evenement.preventDefault();
+    const nom = $('nom').value.trim();
+    const type = $('type').value;
+    const solde = lireMontant($('solde').value);
+    const date = $('date').value || null;
+    const rattachement = AVEC_RATTACHEMENT.includes(type) && $('rattachement').value !== ''
+      ? Number($('rattachement').value) : null;
+
+    if (!nom) return message('Le nom du compte est obligatoire.', 'erreur');
+    if (solde === null) return message('Solde initial invalide (exemple : 1250,50).', 'erreur');
+    if (AVEC_RATTACHEMENT.includes(type) && rattachement === null) {
+      return message(type === 'Externe'
+        ? 'Choisis le compte pivot de ce compte externe (par exemple le Compte Commun).'
+        : "Choisis le compte courant de rattachement (crée-en un d'abord si besoin).", 'erreur');
+    }
+    if (enEdition !== null && type !== 'Courant') {
+      const nb = nbRattaches(enEdition);
+      if (nb > 0) {
+        return message(
+          `Ce compte a ${nb} compte(s) rattaché(s) (épargne ou externe) : il doit rester de type Courant.`, 'erreur');
+      }
+    }
+
+    try {
+      if (enEdition === null) {
+        db.executer(
+          `INSERT INTO comptes (nom, type, solde_initial, date_solde_initial, compte_rattachement_id, ordre_affichage)
+           VALUES (?, ?, ?, ?, ?, (SELECT COALESCE(MAX(ordre_affichage), 0) + 1 FROM comptes))`,
+          [nom, type, solde, date, rattachement]);
+      } else {
+        db.executer(
+          `UPDATE comptes SET nom = ?, type = ?, solde_initial = ?, date_solde_initial = ?, compte_rattachement_id = ?
+           WHERE id = ?`,
+          [nom, type, solde, date, rattachement, enEdition]);
+      }
+    } catch (e) {
+      return message(e.message.includes('UNIQUE') ? `Un compte « ${nom} » existe déjà.` : `Erreur : ${e.message}`, 'erreur');
+    }
+    await sauvegarder(`Compte « ${nom} » ${enEdition === null ? 'ajouté' : 'modifié'} et enregistré.`);
+  });
+
+  modeAjout(); // état initial du formulaire
+}
